@@ -89,7 +89,7 @@ export default function Pagos() {
 
   return (
     <div>
-      <div className="metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+      <div className="metrics" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
         <div className="metric">
           <div className="metric-label">Total cobrado</div>
           <div className="metric-value" style={{ color: '#1D9E75' }}>{fmt(totalGeneral)}</div>
