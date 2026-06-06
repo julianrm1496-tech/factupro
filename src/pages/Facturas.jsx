@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { fmt, fmtDate, nextFacturaNumber, today } from '../lib/utils'
-import { Plus, Trash2, CreditCard, Search } from 'lucide-react'
+import { Plus, Trash2, CreditCard } from 'lucide-react'
 
 export default function Facturas() {
   const [facturas, setFacturas] = useState([])
   const [clientes, setClientes] = useState([])
   const [loading, setLoading] = useState(true)
-  const [modal, setModal] = useState(null) // 'nueva' | null
+  const [modal, setModal] = useState(null)
   const [filtro, setFiltro] = useState('')
   const [filtroEstado, setFiltroEstado] = useState('')
   const [saving, setSaving] = useState(false)
@@ -104,83 +104,82 @@ export default function Facturas() {
         </div>
       </div>
 
-      <div className="card">
-        <div className="card-header">
-          <span className="card-header-title">Facturas ({filtered.length})</span>
-          <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
-            <div className="filters">
-              <input
-                placeholder="Buscar factura o cliente..."
-                value={filtro}
-                onChange={e => setFiltro(e.target.value)}
-              />
-              <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)}>
-                <option value="">Todos los estados</option>
-                <option value="pagada">Pagadas</option>
-                <option value="pendiente">Pendientes</option>
-                <option value="vencida">Vencidas</option>
-              </select>
-            </div>
-            <button className="btn btn-primary" onClick={openNueva}>
-              <Plus size={15} /> Nueva factura
-            </button>
-          </div>
-        </div>
-
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Factura</th>
-                <th>Cliente</th>
-                <th className="hide-mobile">Emisión</th>
-                <th>Vencimiento</th>
-                <th>Monto</th>
-                <th>Pagado</th>
-                <th>Estado</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.length === 0 ? (
-                <tr><td colSpan={8}><div className="empty">No hay facturas que mostrar</div></td></tr>
-              ) : filtered.map(f => {
-                const pct = f.monto > 0 ? Math.min(100, Math.round(Number(f.total_pagado) / Number(f.monto) * 100)) : 0
-                return (
-                  <tr key={f.id}>
-                    <td style={{ fontWeight: 600 }}>{f.numero}</td>
-                    <td>{f.cliente_nombre}</td>
-                    <td className="hide-mobile" style={{ color: '#6B7280' }}>{fmtDate(f.fecha_emision)}</td>
-                    <td style={{ color: f.estado === 'vencida' ? '#A32D2D' : '#6B7280' }}>{fmtDate(f.fecha_vencimiento)}</td>
-                    <td>{fmt(f.monto)}</td>
-                    <td>
-                      <div>{fmt(f.total_pagado)}</div>
-                      <div className="progress-bar" style={{ width: 80 }}>
-                        <div className="progress-fill" style={{ width: pct + '%' }} />
-                      </div>
-                    </td>
-                    <td><span className={`badge badge-${f.estado}`}>{f.estado}</span></td>
-                    <td>
-                      <div className="actions-row">
-                        <button
-                          className="btn btn-sm btn-icon"
-                          title="Registrar pago"
-                          onClick={() => window.location.href = '/pagos?factura=' + f.id}
-                        ><CreditCard size={13} /></button>
-                        <button className="btn btn-sm btn-icon btn-danger" onClick={() => eliminar(f.id)} title="Eliminar">
-                          <Trash2 size={13} />
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
-        </div>
+      {/* Filtros y botón */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+        <input
+          placeholder="Buscar factura o cliente..."
+          value={filtro}
+          onChange={e => setFiltro(e.target.value)}
+          style={{ flex: 1, minWidth: 0, height: 38 }}
+        />
+        <select
+          value={filtroEstado}
+          onChange={e => setFiltroEstado(e.target.value)}
+          style={{ width: 'auto', height: 38, flex: '0 0 auto' }}
+        >
+          <option value="">Todos</option>
+          <option value="pagada">Pagadas</option>
+          <option value="pendiente">Pendientes</option>
+          <option value="vencida">Vencidas</option>
+        </select>
+        <button className="btn btn-primary" onClick={openNueva} style={{ height: 38 }}>
+          <Plus size={15} /> Nueva
+        </button>
       </div>
 
-      {/* Modal nueva factura */}
+      {/* Lista de facturas — tarjetas en móvil */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {filtered.length === 0 ? (
+          <div className="empty">No hay facturas que mostrar</div>
+        ) : filtered.map(f => {
+          const pct = f.monto > 0 ? Math.min(100, Math.round(Number(f.total_pagado) / Number(f.monto) * 100)) : 0
+          return (
+            <div key={f.id} style={{ background: '#fff', border: '1px solid var(--gray-200)', borderRadius: 'var(--radius-lg)', padding: '12px 14px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontWeight: 700, fontSize: 14 }}>{f.numero}</div>
+                  <div style={{ fontSize: 13, color: 'var(--gray-700)', marginTop: 2 }}>{f.cliente_nombre}</div>
+                </div>
+                <span className={`badge badge-${f.estado}`}>{f.estado}</span>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginBottom: 8 }}>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '.3px' }}>Monto</div>
+                  <div style={{ fontWeight: 600, fontSize: 14 }}>{fmt(f.monto)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '.3px' }}>Pagado</div>
+                  <div style={{ fontWeight: 600, fontSize: 14, color: '#1D9E75' }}>{fmt(f.total_pagado)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '.3px' }}>Vence</div>
+                  <div style={{ fontSize: 13, color: f.estado === 'vencida' ? '#A32D2D' : 'var(--gray-700)' }}>{fmtDate(f.fecha_vencimiento)}</div>
+                </div>
+                <div>
+                  <div style={{ fontSize: 11, color: 'var(--gray-500)', textTransform: 'uppercase', letterSpacing: '.3px' }}>Cobrado</div>
+                  <div style={{ fontSize: 13 }}>{pct}%</div>
+                </div>
+              </div>
+              <div className="progress-bar" style={{ marginBottom: 10 }}>
+                <div className="progress-fill" style={{ width: pct + '%' }} />
+              </div>
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button
+                  className="btn btn-primary btn-sm"
+                  style={{ flex: 1, justifyContent: 'center' }}
+                  onClick={() => window.location.href = '/pagos?factura=' + f.id}
+                >
+                  <CreditCard size={13} /> Registrar pago
+                </button>
+                <button className="btn btn-sm btn-icon btn-danger" onClick={() => eliminar(f.id)}>
+                  <Trash2 size={13} />
+                </button>
+              </div>
+            </div>
+          )
+        })}
+      </div>
+
       {modal === 'nueva' && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(null)}>
           <div className="modal">
@@ -201,17 +200,17 @@ export default function Facturas() {
                   <input value={form.numero} onChange={e => set('numero', e.target.value)} placeholder="FAC-001" />
                 </div>
                 <div className="form-group">
-                  <label>Monto total (COP) *</label>
+                  <label>Monto (COP) *</label>
                   <input type="number" value={form.monto} onChange={e => set('monto', e.target.value)} placeholder="0" />
                 </div>
               </div>
               <div className="form-row">
                 <div className="form-group">
-                  <label>Fecha de emisión *</label>
+                  <label>Fecha emisión *</label>
                   <input type="date" value={form.fecha_emision} onChange={e => set('fecha_emision', e.target.value)} />
                 </div>
                 <div className="form-group">
-                  <label>Fecha de vencimiento *</label>
+                  <label>Fecha vencimiento *</label>
                   <input type="date" value={form.fecha_vencimiento} onChange={e => set('fecha_vencimiento', e.target.value)} />
                 </div>
               </div>
@@ -219,15 +218,11 @@ export default function Facturas() {
                 <label>Descripción</label>
                 <textarea value={form.descripcion} onChange={e => set('descripcion', e.target.value)} placeholder="Servicios de..." rows={2} />
               </div>
-              <div className="form-group">
-                <label>Notas internas</label>
-                <input value={form.notas} onChange={e => set('notas', e.target.value)} placeholder="Notas opcionales..." />
-              </div>
             </div>
             <div className="modal-footer">
               <button className="btn" onClick={() => setModal(null)}>Cancelar</button>
               <button className="btn btn-primary" onClick={guardar} disabled={saving}>
-                {saving ? <><div className="spinner" style={{ borderTopColor: '#fff', width: 14, height: 14 }} /> Guardando...</> : 'Guardar factura'}
+                {saving ? 'Guardando...' : 'Guardar'}
               </button>
             </div>
           </div>

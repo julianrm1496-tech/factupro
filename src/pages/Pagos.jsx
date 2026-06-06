@@ -26,18 +26,10 @@ export default function Pagos() {
 
   const load = async () => {
     setLoading(true)
-    const [{ data: p }, { data: f }] = await Promise.all([
-      supabase.from('pagos').select('*, facturas(numero, cliente_id, monto, facturas_resumen(cliente_nombre))').order('fecha', { ascending: false }),
+    const [{ data: pagosData }, { data: f }] = await Promise.all([
+      supabase.from('pagos').select(`id, monto, fecha, metodo, referencia, notas, created_at, facturas!inner(numero, cliente_id, monto, clientes!inner(nombre))`).order('fecha', { ascending: false }),
       supabase.from('facturas_resumen').select('id, numero, cliente_nombre, monto, saldo_pendiente, estado').neq('estado', 'pagada').order('numero'),
     ])
-    // For pagos, get client name separately
-    const { data: pagosData } = await supabase
-      .from('pagos')
-      .select(`id, monto, fecha, metodo, referencia, notas, created_at,
-        facturas!inner(numero, cliente_id, monto,
-          clientes!inner(nombre)
-        )`)
-      .order('fecha', { ascending: false })
     setPagos(pagosData || [])
     setFacturas(f || [])
     setLoading(false)
@@ -58,12 +50,8 @@ export default function Pagos() {
     }
     setSaving(true)
     const { error } = await supabase.from('pagos').insert({
-      factura_id: form.factura_id,
-      monto,
-      fecha: form.fecha,
-      metodo: form.metodo,
-      referencia: form.referencia,
-      notas: form.notas,
+      factura_id: form.factura_id, monto, fecha: form.fecha,
+      metodo: form.metodo, referencia: form.referencia, notas: form.notas,
     })
     setSaving(false)
     if (error) { alert('Error: ' + error.message); return }
@@ -79,17 +67,14 @@ export default function Pagos() {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
-  const totalMes = pagos
-    .filter(p => p.fecha?.startsWith(new Date().toISOString().slice(0, 7)))
-    .reduce((s, p) => s + Number(p.monto), 0)
-
+  const totalMes = pagos.filter(p => p.fecha?.startsWith(new Date().toISOString().slice(0, 7))).reduce((s, p) => s + Number(p.monto), 0)
   const totalGeneral = pagos.reduce((s, p) => s + Number(p.monto), 0)
 
   if (loading) return <div className="loading-page"><div className="spinner" /></div>
 
   return (
     <div>
-      <div className="metrics" style={{ gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))' }}>
+      <div className="metrics">
         <div className="metric">
           <div className="metric-label">Total cobrado</div>
           <div className="metric-value" style={{ color: '#1D9E75' }}>{fmt(totalGeneral)}</div>
@@ -99,57 +84,45 @@ export default function Pagos() {
           <div className="metric-label">Este mes</div>
           <div className="metric-value">{fmt(totalMes)}</div>
         </div>
-        <div className="metric">
-          <div className="metric-label">Facturas con saldo</div>
-          <div className="metric-value" style={{ color: '#854F0B' }}>{facturas.length}</div>
-          <div className="metric-sub">pendientes de cobro</div>
-        </div>
       </div>
 
-      <div className="card">
-        <div className="card-header">
-          <span className="card-header-title">Historial de pagos ({pagos.length})</span>
-          <button className="btn btn-primary" onClick={openNuevo} disabled={facturas.length === 0}>
-            <Plus size={15} /> Registrar pago
-          </button>
-        </div>
-        {facturas.length === 0 && pagos.length === 0 && (
-          <div className="empty">No hay facturas pendientes de pago</div>
-        )}
-        <div className="table-wrapper">
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>Factura</th>
-                <th className="hide-mobile">Cliente</th>
-                <th>Monto</th>
-                <th className="hide-mobile">Método</th>
-                <th className="hide-mobile">Referencia</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {pagos.length === 0 ? (
-                <tr><td colSpan={7}><div className="empty">No hay pagos registrados</div></td></tr>
-              ) : pagos.map(p => (
-                <tr key={p.id}>
-                  <td style={{ color: '#6B7280', whiteSpace: 'nowrap' }}>{fmtDate(p.fecha)}</td>
-                  <td style={{ fontWeight: 600 }}>{p.facturas?.numero}</td>
-                  <td className="hide-mobile">{p.facturas?.clientes?.nombre}</td>
-                  <td style={{ fontWeight: 700, color: '#1D9E75' }}>{fmt(p.monto)}</td>
-                  <td className="hide-mobile"><span className="badge badge-blue">{p.metodo}</span></td>
-                  <td className="hide-mobile" style={{ color: '#6B7280', fontSize: 12 }}>{p.referencia || p.notas || '—'}</td>
-                  <td>
-                    <button className="btn btn-sm btn-icon btn-danger" onClick={() => eliminar(p.id)}>
-                      <Trash2 size={13} />
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+        <div style={{ fontWeight: 600, fontSize: 14 }}>Historial de pagos ({pagos.length})</div>
+        <button className="btn btn-primary btn-sm" onClick={openNuevo} disabled={facturas.length === 0}>
+          <Plus size={14} /> Registrar pago
+        </button>
+      </div>
+
+      {facturas.length === 0 && pagos.length === 0 && (
+        <div className="empty">No hay facturas pendientes de pago</div>
+      )}
+
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {pagos.map(p => (
+          <div key={p.id} style={{ background: '#fff', border: '1px solid var(--gray-200)', borderRadius: 'var(--radius-lg)', padding: '12px 14px' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 6 }}>
+              <div>
+                <div style={{ fontWeight: 700, fontSize: 15, color: '#1D9E75' }}>{fmt(p.monto)}</div>
+                <div style={{ fontSize: 13, fontWeight: 600, marginTop: 2 }}>{p.facturas?.numero}</div>
+                <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{p.facturas?.clientes?.nombre}</div>
+              </div>
+              <div style={{ textAlign: 'right' }}>
+                <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{fmtDate(p.fecha)}</div>
+                <span className="badge badge-blue" style={{ marginTop: 4 }}>{p.metodo}</span>
+              </div>
+            </div>
+            {(p.referencia || p.notas) && (
+              <div style={{ fontSize: 12, color: 'var(--gray-500)', borderTop: '1px solid var(--gray-100)', paddingTop: 6, marginTop: 6 }}>
+                {p.referencia || p.notas}
+              </div>
+            )}
+            <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 8 }}>
+              <button className="btn btn-sm btn-icon btn-danger" onClick={() => eliminar(p.id)}>
+                <Trash2 size={13} />
+              </button>
+            </div>
+          </div>
+        ))}
       </div>
 
       {modal === 'nuevo' && (
@@ -180,11 +153,11 @@ export default function Pagos() {
               })()}
               <div className="form-row">
                 <div className="form-group">
-                  <label>Monto del pago (COP) *</label>
-                  <input type="number" value={form.monto} onChange={e => set('monto', e.target.value)} placeholder="0" autoFocus />
+                  <label>Monto (COP) *</label>
+                  <input type="number" value={form.monto} onChange={e => set('monto', e.target.value)} placeholder="0" />
                 </div>
                 <div className="form-group">
-                  <label>Fecha de pago *</label>
+                  <label>Fecha *</label>
                   <input type="date" value={form.fecha} onChange={e => set('fecha', e.target.value)} />
                 </div>
               </div>
@@ -199,15 +172,9 @@ export default function Pagos() {
                   <option>Otro</option>
                 </select>
               </div>
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Referencia / No. operación</label>
-                  <input value={form.referencia} onChange={e => set('referencia', e.target.value)} placeholder="TRF-123456" />
-                </div>
-                <div className="form-group">
-                  <label>Notas</label>
-                  <input value={form.notas} onChange={e => set('notas', e.target.value)} placeholder="Opcional..." />
-                </div>
+              <div className="form-group">
+                <label>Referencia / No. operación</label>
+                <input value={form.referencia} onChange={e => set('referencia', e.target.value)} placeholder="TRF-123456" />
               </div>
             </div>
             <div className="modal-footer">

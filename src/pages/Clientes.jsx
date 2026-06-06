@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { fmt, initials } from '../lib/utils'
-import { Plus, Pencil, Trash2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Phone, Mail } from 'lucide-react'
 
 export default function Clientes() {
   const [clientes, setClientes] = useState([])
@@ -75,31 +75,39 @@ export default function Clientes() {
 
   return (
     <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16, gap: 12, flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12 }}>
         <input
-          style={{ maxWidth: 280 }}
           placeholder="Buscar cliente..."
           value={buscar}
           onChange={e => setBuscar(e.target.value)}
+          style={{ flex: 1, height: 38 }}
         />
-        <button className="btn btn-primary" onClick={openNuevo}>
-          <Plus size={15} /> Nuevo cliente
+        <button className="btn btn-primary" onClick={openNuevo} style={{ height: 38 }}>
+          <Plus size={15} /> Nuevo
         </button>
       </div>
 
       <div className="client-grid">
-        {filtered.length === 0 && <div className="empty" style={{ gridColumn: '1/-1' }}>No hay clientes registrados</div>}
+        {filtered.length === 0 && <div className="empty">No hay clientes registrados</div>}
         {filtered.map(c => {
           const r = resumen[c.id] || { total: 0, cobrado: 0, pendiente: 0, count: 0 }
           return (
             <div key={c.id} className="client-card">
               <div className="avatar avatar-lg">{initials(c.nombre)}</div>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <div style={{ fontWeight: 600, fontSize: 14, marginBottom: 2 }}>{c.nombre}</div>
-                {c.nit && <div style={{ fontSize: 12, color: '#6B7280' }}>NIT: {c.nit}</div>}
-                {c.email && <div style={{ fontSize: 12, color: '#6B7280', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.email}</div>}
-                {c.telefono && <div style={{ fontSize: 12, color: '#6B7280' }}>{c.telefono}</div>}
-                <div style={{ display: 'flex', gap: 10, marginTop: 8, flexWrap: 'wrap' }}>
+                <div style={{ fontWeight: 700, fontSize: 14, marginBottom: 2 }}>{c.nombre}</div>
+                {c.nit && <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>NIT: {c.nit}</div>}
+                {c.email && (
+                  <div style={{ fontSize: 12, color: 'var(--gray-500)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                    <Mail size={11} /> {c.email}
+                  </div>
+                )}
+                {c.telefono && (
+                  <div style={{ fontSize: 12, color: 'var(--gray-500)', display: 'flex', alignItems: 'center', gap: 4, marginTop: 2 }}>
+                    <Phone size={11} /> {c.telefono}
+                  </div>
+                )}
+                <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
                   <span style={{ fontSize: 11, fontWeight: 600, color: '#0F6E56', background: '#E1F5EE', padding: '2px 8px', borderRadius: 20 }}>
                     {fmt(r.cobrado)} cobrado
                   </span>
@@ -109,11 +117,11 @@ export default function Clientes() {
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: 11, color: '#9CA3AF', marginTop: 4 }}>{r.count} factura{r.count !== 1 ? 's' : ''}</div>
+                <div style={{ fontSize: 11, color: 'var(--gray-500)', marginTop: 4 }}>{r.count} factura{r.count !== 1 ? 's' : ''}</div>
               </div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                <button className="btn btn-sm btn-icon" onClick={() => openEditar(c)} title="Editar"><Pencil size={13} /></button>
-                <button className="btn btn-sm btn-icon btn-danger" onClick={() => eliminar(c.id)} title="Eliminar"><Trash2 size={13} /></button>
+                <button className="btn btn-sm btn-icon" onClick={() => openEditar(c)}><Pencil size={13} /></button>
+                <button className="btn btn-sm btn-icon btn-danger" onClick={() => eliminar(c.id)}><Trash2 size={13} /></button>
               </div>
             </div>
           )
@@ -128,29 +136,27 @@ export default function Clientes() {
               <button className="btn btn-icon btn-sm" onClick={() => setModal(null)}>✕</button>
             </div>
             <div className="modal-body">
-              <div className="form-row">
-                <div className="form-group">
-                  <label>Nombre / Empresa *</label>
-                  <input value={form.nombre} onChange={e => set('nombre', e.target.value)} placeholder="Empresa S.A.S" autoFocus />
-                </div>
-                <div className="form-group">
-                  <label>NIT / Identificación</label>
-                  <input value={form.nit} onChange={e => set('nit', e.target.value)} placeholder="900123456-1" />
-                </div>
+              <div className="form-group">
+                <label>Nombre / Empresa *</label>
+                <input value={form.nombre} onChange={e => set('nombre', e.target.value)} placeholder="Empresa S.A.S" autoFocus />
               </div>
               <div className="form-row">
                 <div className="form-group">
-                  <label>Correo electrónico</label>
-                  <input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="pagos@empresa.com" />
+                  <label>NIT</label>
+                  <input value={form.nit} onChange={e => set('nit', e.target.value)} placeholder="900123456-1" />
                 </div>
                 <div className="form-group">
                   <label>Teléfono</label>
-                  <input value={form.telefono} onChange={e => set('telefono', e.target.value)} placeholder="+57 300 000 0000" />
+                  <input value={form.telefono} onChange={e => set('telefono', e.target.value)} placeholder="+57 300..." />
                 </div>
               </div>
               <div className="form-group">
+                <label>Correo electrónico</label>
+                <input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="pagos@empresa.com" />
+              </div>
+              <div className="form-group">
                 <label>Dirección</label>
-                <input value={form.direccion} onChange={e => set('direccion', e.target.value)} placeholder="Calle 123 #45-67, Bogotá" />
+                <input value={form.direccion} onChange={e => set('direccion', e.target.value)} placeholder="Calle 123 #45-67" />
               </div>
               <div className="form-group">
                 <label>Notas</label>
@@ -160,7 +166,7 @@ export default function Clientes() {
             <div className="modal-footer">
               <button className="btn" onClick={() => setModal(null)}>Cancelar</button>
               <button className="btn btn-primary" onClick={guardar} disabled={saving}>
-                {saving ? 'Guardando...' : 'Guardar cliente'}
+                {saving ? 'Guardando...' : 'Guardar'}
               </button>
             </div>
           </div>
