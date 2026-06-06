@@ -6,6 +6,7 @@ import Dashboard from './pages/Dashboard'
 import Facturas from './pages/Facturas'
 import Clientes from './pages/Clientes'
 import Pagos from './pages/Pagos'
+import Productos from './pages/Productos'
 
 function PrivateRoute({ children }) {
   const { user, loading } = useAuth()
@@ -25,6 +26,7 @@ export default function App() {
             <Route path="facturas" element={<Facturas />} />
             <Route path="clientes" element={<Clientes />} />
             <Route path="pagos" element={<Pagos />} />
+            <Route path="productos" element={<Productos />} />
           </Route>
         </Routes>
       </BrowserRouter>
