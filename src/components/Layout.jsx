@@ -3,7 +3,7 @@ import { Outlet, NavLink, useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { initials } from '../lib/utils'
 import {
-  LayoutDashboard, FileText, Users, CreditCard, Package, LogOut, Menu, X
+  LayoutDashboard, FileText, Users, CreditCard, LogOut, Menu, X
 } from 'lucide-react'
 
 const nav = [
@@ -11,7 +11,6 @@ const nav = [
   { to: '/facturas', label: 'Facturas', Icon: FileText },
   { to: '/clientes', label: 'Clientes', Icon: Users },
   { to: '/pagos', label: 'Pagos', Icon: CreditCard },
-  { to: '/productos', label: 'Productos', Icon: Package },
 ]
 
 export default function Layout() {
