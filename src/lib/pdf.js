@@ -47,7 +47,7 @@ function footer(doc) {
 }
 
 // ─── PDF 1: Factura individual ───
-export function generarFacturaPDF({ factura, cliente, items, totalPagado }) {
+export function generarFacturaPDF({ factura, cliente, items, totalPagado, pagos }) {
   const doc = new jsPDF({ unit: 'mm', format: 'letter' })
   header(doc, 'FACTURA')
 
@@ -62,9 +62,16 @@ export function generarFacturaPDF({ factura, cliente, items, totalPagado }) {
   doc.text(`Fecha de emision: ${fmtDate(factura.fecha_emision)}`, 14, 46)
   doc.text(`Fecha de vencimiento: ${fmtDate(factura.fecha_vencimiento)}`, 14, 51)
 
-  // Cliente
+  // Cliente — todas las lineas de info disponibles
+  const infoLines = []
+  if (cliente?.nit) infoLines.push(`NIT: ${cliente.nit}`)
+  if (cliente?.telefono) infoLines.push(`Tel: ${cliente.telefono}`)
+  if (cliente?.email) infoLines.push(`Email: ${cliente.email}`)
+  if (cliente?.direccion) infoLines.push(`Dir: ${cliente.direccion}`)
+
+  const clienteBoxHeight = Math.max(24, 17 + infoLines.length * 4.4)
   doc.setFillColor(232, 248, 242)
-  doc.roundedRect(120, 34, 82, 24, 2, 2, 'F')
+  doc.roundedRect(120, 34, 82, clienteBoxHeight, 2, 2, 'F')
   doc.setTextColor(...GREEN_DARK)
   doc.setFontSize(8)
   doc.setFont('helvetica', 'bold')
@@ -76,10 +83,14 @@ export function generarFacturaPDF({ factura, cliente, items, totalPagado }) {
   doc.setFontSize(8)
   doc.setTextColor(...GRAY)
   let cy = 51
-  if (cliente?.nit) { doc.text(`NIT: ${cliente.nit}`, 124, cy); cy += 4 }
-  if (cliente?.telefono) { doc.text(`Tel: ${cliente.telefono}`, 124, cy) }
+  infoLines.forEach(line => {
+    doc.text(line, 124, cy, { maxWidth: 74 })
+    cy += 4.4
+  })
 
-  // Tabla de items
+  // Tabla de items — el inicio se ajusta si el recuadro de cliente crecio
+  const itemsStartY = Math.max(66, 34 + clienteBoxHeight + 8)
+
   const rows = (items || []).map(i => [
     i.descripcion,
     String(Number(i.cantidad)),
@@ -88,7 +99,7 @@ export function generarFacturaPDF({ factura, cliente, items, totalPagado }) {
   ])
 
   autoTable(doc, {
-    startY: 66,
+    startY: itemsStartY,
     head: [['Descripcion', 'Cant.', 'Precio unit.', 'Subtotal']],
     body: rows.length ? rows : [['(Sin detalle de items)', '', '', fmt(factura.monto)]],
     theme: 'grid',
@@ -128,11 +139,35 @@ export function generarFacturaPDF({ factura, cliente, items, totalPagado }) {
   doc.text('Saldo pendiente:', 150, y + 17, { align: 'right' })
   doc.text(fmt(saldo > 0 ? saldo : 0), 200, y + 17, { align: 'right' })
 
+  // Historial de pagos
+  const pagosY = y + 28
+  doc.setTextColor(...DARK)
+  doc.setFontSize(10)
+  doc.setFont('helvetica', 'bold')
+  doc.text('Historial de pagos', 14, pagosY)
+
+  const pagosRows = (pagos && pagos.length > 0)
+    ? pagos.map(p => [fmtDate(p.fecha), p.metodo || '—', fmt(p.monto)])
+    : [['Sin pagos registrados', '', '']]
+
+  autoTable(doc, {
+    startY: pagosY + 4,
+    head: [['Fecha de pago', 'Método de pago', 'Monto']],
+    body: pagosRows,
+    theme: 'grid',
+    headStyles: { fillColor: GREEN_DARK, textColor: 255, fontStyle: 'bold', fontSize: 9 },
+    bodyStyles: { fontSize: 9, textColor: DARK },
+    alternateRowStyles: { fillColor: [249, 250, 251] },
+    columnStyles: { 2: { halign: 'right' } },
+    margin: { left: 14, right: 14 },
+  })
+
   if (factura.descripcion) {
+    const notasY = doc.lastAutoTable.finalY + 10
     doc.setFontSize(8)
     doc.setFont('helvetica', 'normal')
     doc.setTextColor(...GRAY)
-    doc.text(`Notas: ${factura.descripcion}`, 14, y + 30, { maxWidth: 180 })
+    doc.text(`Notas: ${factura.descripcion}`, 14, notasY, { maxWidth: 180 })
   }
 
   footer(doc)

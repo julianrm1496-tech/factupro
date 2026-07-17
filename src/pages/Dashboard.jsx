@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
-import { fmt } from '../lib/utils'
+import { fmt, fmtDate } from '../lib/utils'
+import { Receipt, CheckCircle, Clock, AlertTriangle, X, CreditCard } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LabelList,
   PieChart, Pie, Cell
@@ -11,6 +12,8 @@ const COLORS = { pagada: '#1D9E75', pendiente: '#F59E0B', vencida: '#EF4444' }
 export default function Dashboard() {
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
+  const [panel, setPanel] = useState(null) // null | 'porCobrar' | 'vencidas'
+  const [ordenVencidas, setOrdenVencidas] = useState('urgencia') // urgencia (emision mas antigua) | monto
 
   useEffect(() => { load() }, [])
 
@@ -24,7 +27,23 @@ export default function Dashboard() {
     setLoading(false)
   }
 
-  if (loading) return <div className="loading-page"><div className="spinner" /></div>
+  if (loading) return (
+    <div>
+      <div className="skel-metrics">
+        {[0,1,2,3].map(i => (
+          <div key={i} className="skel-metric">
+            <div className="skeleton skel-line" style={{ width: '50%' }} />
+            <div className="skeleton skel-line" style={{ width: '75%', height: 18, marginBottom: 6 }} />
+            <div className="skeleton skel-line" style={{ width: '35%', height: 9, marginBottom: 0 }} />
+          </div>
+        ))}
+      </div>
+      <div className="dash-row">
+        <div className="skel-row" style={{ height: 280 }}><div className="skeleton" style={{ width: '100%', height: '100%' }} /></div>
+        <div className="skel-row" style={{ height: 280 }}><div className="skeleton" style={{ width: '100%', height: '100%' }} /></div>
+      </div>
+    </div>
+  )
 
   const { facturas, pagos } = data
 
@@ -59,32 +78,100 @@ export default function Dashboard() {
   const topClientes = Object.values(porCliente).filter(c => c.pendiente > 0).sort((a, b) => b.pendiente - a.pendiente).slice(0, 5)
   const maxPendiente = Math.max(...topClientes.map(c => c.pendiente), 1)
 
-  const recentesVencidas = vencidas.slice(0, 5)
+  const diasVencida = (fechaVencimiento) => {
+    const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
+    const venc = new Date(fechaVencimiento + 'T00:00:00')
+    return Math.floor((hoy - venc) / (1000 * 60 * 60 * 24))
+  }
+
+  const vencidasOrdenadas = [...vencidas].sort((a, b) => (
+    ordenVencidas === 'monto'
+      ? Number(b.saldo_pendiente) - Number(a.saldo_pendiente)
+      : new Date(a.fecha_emision) - new Date(b.fecha_emision) // mas antigua primero = mas urgente
+  ))
+  const recentesVencidas = vencidasOrdenadas.slice(0, 5)
+  const porCobrarLista = facturas.filter(f => f.estado !== 'pagada').sort((a, b) => Number(b.saldo_pendiente) - Number(a.saldo_pendiente))
 
   return (
     <div>
-      <div className="metrics">
+      <div className="metrics stagger-in">
         <div className="metric metric-gradient" style={{ '--grad-from': '#1D9E75', '--grad-to': '#0F6E56' }}>
-          <div className="metric-label" style={{ color: 'rgba(255,255,255,.85)' }}>Total facturado</div>
+          <div className="metric-label" style={{ color: 'rgba(255,255,255,.85)' }}><Receipt size={15} /> Total facturado</div>
           <div className="metric-value" style={{ color: '#fff' }}>{fmt(totalFacturado)}</div>
           <div className="metric-sub" style={{ color: 'rgba(255,255,255,.7)' }}>{facturas.length} facturas</div>
         </div>
-        <div className="metric">
-          <div className="metric-label">Cobrado</div>
-          <div className="metric-value" style={{ color: '#1D9E75' }}>{fmt(totalCobrado)}</div>
+        <div className="metric metric-success">
+          <div className="metric-label"><CheckCircle size={15} /> Cobrado</div>
+          <div className="metric-value" style={{ color: 'var(--green-dark)' }}>{fmt(totalCobrado)}</div>
           <div className="metric-sub">{totalFacturado > 0 ? Math.round(totalCobrado / totalFacturado * 100) : 0}% del total</div>
         </div>
-        <div className="metric">
-          <div className="metric-label">Por cobrar</div>
-          <div className="metric-value" style={{ color: '#854F0B' }}>{fmt(totalPendiente)}</div>
+        <div
+          className="metric metric-warn"
+          role="button" tabIndex={0}
+          onClick={() => setPanel('porCobrar')}
+          onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && setPanel('porCobrar')}
+          title="Ver facturas por cobrar"
+        >
+          <div className="metric-label"><Clock size={15} /> Por cobrar</div>
+          <div className="metric-value">{fmt(totalPendiente)}</div>
           <div className="metric-sub">{facturas.filter(f => f.estado !== 'pagada').length} activas</div>
         </div>
-        <div className="metric">
-          <div className="metric-label">Vencido</div>
-          <div className="metric-value" style={{ color: '#A32D2D' }}>{fmt(totalVencido)}</div>
+        <div
+          className="metric metric-danger"
+          role="button" tabIndex={0}
+          onClick={() => setPanel('vencidas')}
+          onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && setPanel('vencidas')}
+          title="Ver facturas vencidas"
+        >
+          <div className="metric-label"><AlertTriangle size={15} /> Vencido</div>
+          <div className="metric-value">{fmt(totalVencido)}</div>
           <div className="metric-sub">{vencidas.length} vencidas</div>
         </div>
       </div>
+
+      {panel && (() => {
+        const lista = panel === 'porCobrar' ? porCobrarLista : vencidasOrdenadas
+        const titulo = panel === 'porCobrar' ? 'Facturas por cobrar' : 'Facturas vencidas'
+        return (
+          <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setPanel(null)}>
+            <div className="modal" style={{ maxWidth: 480 }}>
+              <div className="modal-header">
+                <span className="modal-title">{titulo} ({lista.length})</span>
+                <button className="btn btn-icon btn-sm" onClick={() => setPanel(null)}><X size={16} /></button>
+              </div>
+              <div className="modal-body" style={{ maxHeight: '65vh', overflowY: 'auto' }}>
+                {lista.length === 0 ? (
+                  <div className="empty">No hay facturas para mostrar</div>
+                ) : lista.map(f => (
+                  <div key={f.id} style={{
+                    display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 10,
+                    padding: '10px 12px', borderRadius: 10, background: 'var(--gray-50)', border: '1px solid var(--gray-200)',
+                  }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+                        <span style={{ fontWeight: 700, fontSize: 13.5 }}>{f.numero}</span>
+                        {f.estado === 'vencida' && <span className="badge badge-vencida">vencida</span>}
+                      </div>
+                      <div style={{ fontSize: 12.5, marginTop: 2 }}>{f.cliente_nombre}</div>
+                      <div style={{ fontSize: 11.5, color: 'var(--gray-500)', marginTop: 1 }}>Vence: {fmtDate(f.fecha_vencimiento)}</div>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10, flexShrink: 0 }}>
+                      <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--amber)' }}>{fmt(f.saldo_pendiente)}</span>
+                      <button
+                        className="btn btn-primary btn-sm"
+                        onClick={() => window.location.href = '/pagos?factura=' + f.id}
+                        title="Registrar pago"
+                      >
+                        <CreditCard size={13} />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )
+      })()}
 
       <div className="dash-row">
         <div className="card">
@@ -196,19 +283,44 @@ export default function Dashboard() {
         </div>
 
         <div className="card">
-          <div className="card-header"><span className="card-header-title">Facturas vencidas</span></div>
+          <div className="card-header" style={{ flexWrap: 'wrap', gap: 8 }}>
+            <span className="card-header-title">Facturas vencidas</span>
+            {vencidas.length > 1 && (
+              <div style={{ display: 'flex', gap: 4 }}>
+                <button
+                  className="btn btn-sm"
+                  style={{ fontWeight: ordenVencidas === 'urgencia' ? 700 : 500, background: ordenVencidas === 'urgencia' ? 'var(--blue-light)' : '#fff', color: ordenVencidas === 'urgencia' ? 'var(--blue)' : 'var(--gray-700)' }}
+                  onClick={() => setOrdenVencidas('urgencia')}
+                  title="Mas antiguas primero (mas urgentes)"
+                >
+                  Mas urgentes
+                </button>
+                <button
+                  className="btn btn-sm"
+                  style={{ fontWeight: ordenVencidas === 'monto' ? 700 : 500, background: ordenVencidas === 'monto' ? 'var(--blue-light)' : '#fff', color: ordenVencidas === 'monto' ? 'var(--blue)' : 'var(--gray-700)' }}
+                  onClick={() => setOrdenVencidas('monto')}
+                  title="Mayor monto primero"
+                >
+                  Mayor monto
+                </button>
+              </div>
+            )}
+          </div>
           <div className="card-body">
             {recentesVencidas.length === 0 ? (
               <div className="empty" style={{ color: '#1D9E75' }}>Sin facturas vencidas</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {recentesVencidas.map(f => (
-                  <div key={f.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: '#FEF2F2', borderRadius: 8 }}>
-                    <div>
+                  <div key={f.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: '#FEF2F2', borderRadius: 8, gap: 8 }}>
+                    <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 13 }}>{f.numero}</div>
                       <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{f.cliente_nombre}</div>
+                      <div style={{ fontSize: 11, color: '#A32D2D', marginTop: 2 }}>
+                        Vence: {fmtDate(f.fecha_vencimiento)} · hace {diasVencida(f.fecha_vencimiento)}d
+                      </div>
                     </div>
-                    <div style={{ fontWeight: 700, color: '#A32D2D', fontSize: 13 }}>{fmt(f.saldo_pendiente)}</div>
+                    <div style={{ fontWeight: 700, color: '#A32D2D', fontSize: 13, whiteSpace: 'nowrap' }}>{fmt(f.saldo_pendiente)}</div>
                   </div>
                 ))}
               </div>

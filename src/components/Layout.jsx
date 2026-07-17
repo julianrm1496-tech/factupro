@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Outlet, NavLink, useNavigate } from 'react-router-dom'
+import { Outlet, NavLink, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { initials } from '../lib/utils'
 import {
@@ -16,7 +16,11 @@ const nav = [
 export default function Layout() {
   const { user, signOut } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [menuOpen, setMenuOpen] = useState(false)
+
+  const activo = nav.find(n => location.pathname.startsWith(n.to)) || nav[0]
+  const ActivoIcon = activo.Icon
 
   const handleSignOut = async () => {
     await signOut()
@@ -61,7 +65,10 @@ export default function Layout() {
           <button className="btn btn-icon mobile-menu-btn" onClick={() => setMenuOpen(!menuOpen)}>
             {menuOpen ? <X size={18} /> : <Menu size={18} />}
           </button>
-          <div className="topbar-title">FactuPro</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+            <div className="topbar-icon"><ActivoIcon size={17} /></div>
+            <div className="topbar-title">{activo.label}</div>
+          </div>
           <div />
         </header>
         <main className="content">

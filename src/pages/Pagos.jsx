@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useLocation } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { fmt, fmtDate, today } from '../lib/utils'
-import { Plus, Trash2 } from 'lucide-react'
+import { generarFacturaPDF } from '../lib/pdf'
+import { Plus, Trash2, CheckCircle, Calendar } from 'lucide-react'
 
 export default function Pagos() {
   const location = useLocation()
@@ -12,6 +13,7 @@ export default function Pagos() {
   const [modal, setModal] = useState(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ factura_id: '', monto: '', fecha: today(), metodo: 'Transferencia bancaria', referencia: '' })
+  const [ordenPagos, setOrdenPagos] = useState({ key: 'fecha', dir: 'desc' })
 
   useEffect(() => { load() }, [])
 
@@ -56,8 +58,25 @@ export default function Pagos() {
       factura_id: form.factura_id, monto, fecha: form.fecha,
       metodo: form.metodo, referencia: form.referencia,
     })
+    if (error) { setSaving(false); alert('Error: ' + error.message); return }
+
+    // Descarga automatica del PDF de la factura con el pago ya reflejado
+    const [{ data: facturaActualizada }, { data: pagosFactura }] = await Promise.all([
+      supabase.from('facturas_resumen').select('*').eq('id', form.factura_id).single(),
+      supabase.from('pagos').select('monto, fecha, metodo').eq('factura_id', form.factura_id).order('fecha'),
+    ])
+    if (facturaActualizada) {
+      const [{ data: cliente }, { data: items }] = await Promise.all([
+        supabase.from('clientes').select('*').eq('id', facturaActualizada.cliente_id).single(),
+        supabase.from('factura_items').select('*').eq('factura_id', form.factura_id).order('created_at'),
+      ])
+      generarFacturaPDF({
+        factura: facturaActualizada, cliente, items: items || [],
+        totalPagado: facturaActualizada.total_pagado, pagos: pagosFactura || [],
+      })
+    }
+
     setSaving(false)
-    if (error) { alert('Error: ' + error.message); return }
     setModal(null)
     load()
   }
@@ -70,24 +89,73 @@ export default function Pagos() {
 
   const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
 
+  const toggleOrdenPagos = (key) => {
+    setOrdenPagos(prev => prev.key === key ? { key, dir: prev.dir === 'asc' ? 'desc' : 'asc' } : { key, dir: key === 'fecha' ? 'desc' : 'desc' })
+  }
+  const textoOrdenPagos = (key, dir) => key === 'fecha'
+    ? (dir === 'asc' ? 'antiguas primero' : 'recientes primero')
+    : (dir === 'asc' ? 'menor a mayor' : 'mayor a menor')
+
+  const pagosOrdenados = useMemo(() => {
+    const arr = [...pagos]
+    const { key, dir } = ordenPagos
+    arr.sort((a, b) => {
+      let va = a[key], vb = b[key]
+      if (key === 'fecha') { va = new Date(va).getTime(); vb = new Date(vb).getTime() }
+      else { va = Number(va) || 0; vb = Number(vb) || 0 }
+      return dir === 'asc' ? va - vb : vb - va
+    })
+    return arr
+  }, [pagos, ordenPagos])
+
   const totalMes = pagos.filter(p => p.fecha?.startsWith(new Date().toISOString().slice(0, 7))).reduce((s, p) => s + Number(p.monto), 0)
   const totalGeneral = pagos.reduce((s, p) => s + Number(p.monto), 0)
 
-  if (loading) return <div className="loading-page"><div className="spinner" /></div>
+  if (loading) return (
+    <div>
+      <div className="skel-metrics" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+        {[0,1].map(i => (
+          <div key={i} className="skel-metric">
+            <div className="skeleton skel-line" style={{ width: '55%' }} />
+            <div className="skeleton skel-line" style={{ width: '70%', height: 18, marginBottom: 0 }} />
+          </div>
+        ))}
+      </div>
+      {[0,1,2,3].map(i => <div key={i} className="skel-row"><div className="skeleton skel-line" style={{ width: '50%', marginBottom: 0 }} /></div>)}
+    </div>
+  )
 
   return (
     <div>
-      <div className="metrics" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
-        <div className="metric"><div className="metric-label">Total cobrado</div><div className="metric-value" style={{ color: '#1D9E75' }}>{fmt(totalGeneral)}</div></div>
-        <div className="metric"><div className="metric-label">Este mes</div><div className="metric-value">{fmt(totalMes)}</div></div>
+      <div className="metrics stagger-in" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+        <div className="metric metric-success"><div className="metric-label"><CheckCircle size={15} /> Total cobrado</div><div className="metric-value" style={{ color: 'var(--green-dark)' }}>{fmt(totalGeneral)}</div></div>
+        <div className="metric metric-brand"><div className="metric-label"><Calendar size={15} /> Este mes</div><div className="metric-value">{fmt(totalMes)}</div></div>
       </div>
 
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 8, flexWrap: 'wrap', gap: 8 }}>
         <div style={{ fontWeight: 600, fontSize: 14 }}>Historial de pagos ({pagos.length})</div>
         <button className="btn btn-primary btn-sm" onClick={openNuevo} disabled={facturas.length === 0}>
           <Plus size={14} /> Registrar pago
         </button>
       </div>
+
+      {pagos.length > 1 && (
+        <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
+          <span style={{ fontSize: 11.5, color: 'var(--gray-500)', marginRight: 2 }}>Ordenar por:</span>
+          {[{ key: 'fecha', label: 'Fecha' }, { key: 'monto', label: 'Monto' }].map(o => (
+            <button
+              key={o.key}
+              className="btn btn-sm"
+              style={{ fontWeight: ordenPagos.key === o.key ? 700 : 500, background: ordenPagos.key === o.key ? 'var(--blue-light)' : '#fff', color: ordenPagos.key === o.key ? 'var(--blue)' : 'var(--gray-700)' }}
+              onClick={() => toggleOrdenPagos(o.key)}
+            >
+              {o.label}{ordenPagos.key === o.key && (
+                <span style={{ fontSize: 10.5, fontWeight: 500, opacity: .85 }}> · {textoOrdenPagos(o.key, ordenPagos.dir)}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
 
       {facturas.length === 0 && pagos.length === 0 && <div className="empty">No hay facturas pendientes de pago</div>}
 
@@ -96,7 +164,7 @@ export default function Pagos() {
           <table className="table-compact">
             <thead><tr><th>Fecha</th><th>Factura</th><th>Cliente</th><th style={{ textAlign: 'right' }}>Monto</th><th>Método</th><th></th></tr></thead>
             <tbody>
-              {pagos.length === 0 ? <tr><td colSpan={6}><div className="empty">No hay pagos registrados</div></td></tr> : pagos.map(p => (
+              {pagos.length === 0 ? <tr><td colSpan={6}><div className="empty">No hay pagos registrados</div></td></tr> : pagosOrdenados.map(p => (
                 <tr key={p.id}>
                   <td style={{ color: 'var(--gray-500)' }}>{fmtDate(p.fecha)}</td>
                   <td style={{ fontWeight: 600 }}>{p.facturas?.numero}</td>
@@ -113,7 +181,7 @@ export default function Pagos() {
 
       <div className="show-mobile-block">
        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-        {pagos.map(p => (
+        {pagosOrdenados.map(p => (
           <div key={p.id} className="factura-card-mobile">
             <div className="fcm-top">
               <div>
@@ -175,6 +243,12 @@ export default function Pagos() {
             </div>
           </div>
         </div>
+      )}
+
+      {facturas.length > 0 && (
+        <button className="fab" onClick={openNuevo} title="Registrar pago" aria-label="Registrar pago">
+          <Plus size={24} />
+        </button>
       )}
     </div>
   )

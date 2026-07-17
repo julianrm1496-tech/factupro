@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { fmt, initials } from '../lib/utils'
 import { generarEstadoCuentaPDF } from '../lib/pdf'
-import { Plus, Pencil, Trash2, Phone, FileDown } from 'lucide-react'
+import { Plus, Pencil, Trash2, Phone, FileDown, Users, AlertTriangle, CheckCircle } from 'lucide-react'
 
 export default function Clientes() {
   const [clientes, setClientes] = useState([])
@@ -75,14 +75,26 @@ export default function Clientes() {
 
   const totalClientesConDeuda = Object.values(resumen).filter(r => r.pendiente > 0).length
 
-  if (loading) return <div className="loading-page"><div className="spinner" /></div>
+  if (loading) return (
+    <div>
+      <div className="skel-metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+        {[0,1,2].map(i => (
+          <div key={i} className="skel-metric">
+            <div className="skeleton skel-line" style={{ width: '55%' }} />
+            <div className="skeleton skel-line" style={{ width: '40%', height: 18, marginBottom: 0 }} />
+          </div>
+        ))}
+      </div>
+      {[0,1,2,3].map(i => <div key={i} className="skel-row"><div className="skeleton skel-line" style={{ width: '45%', marginBottom: 0 }} /></div>)}
+    </div>
+  )
 
   return (
     <div>
-      <div className="metrics" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
-        <div className="metric"><div className="metric-label">Total clientes</div><div className="metric-value">{clientes.length}</div></div>
-        <div className="metric"><div className="metric-label">Con deuda</div><div className="metric-value" style={{ color: '#854F0B' }}>{totalClientesConDeuda}</div></div>
-        <div className="metric"><div className="metric-label">Al día</div><div className="metric-value" style={{ color: '#1D9E75' }}>{clientes.length - totalClientesConDeuda}</div></div>
+      <div className="metrics stagger-in" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+        <div className="metric metric-brand"><div className="metric-label"><Users size={15} /> Total clientes</div><div className="metric-value">{clientes.length}</div></div>
+        <div className="metric metric-warn"><div className="metric-label"><AlertTriangle size={15} /> Con deuda</div><div className="metric-value">{totalClientesConDeuda}</div></div>
+        <div className="metric metric-success"><div className="metric-label"><CheckCircle size={15} /> Al día</div><div className="metric-value" style={{ color: 'var(--green-dark)' }}>{clientes.length - totalClientesConDeuda}</div></div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
@@ -202,6 +214,10 @@ export default function Clientes() {
           </div>
         </div>
       )}
+
+      <button className="fab" onClick={openNuevo} title="Nuevo cliente" aria-label="Nuevo cliente">
+        <Plus size={24} />
+      </button>
     </div>
   )
 }

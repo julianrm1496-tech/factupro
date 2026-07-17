@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { supabase } from '../lib/supabase'
 import { fmt, fmtDate, nextFacturaNumber, today } from '../lib/utils'
 import { generarFacturaPDF } from '../lib/pdf'
-import { Plus, Trash2, CreditCard, ChevronDown, ChevronRight, FileDown, ArrowUp, ArrowDown, Pencil, UserPlus } from 'lucide-react'
+import { Plus, Trash2, CreditCard, ChevronDown, ChevronRight, FileDown, Pencil, UserPlus, Receipt, CheckCircle, Clock, AlertTriangle } from 'lucide-react'
 
 const COLS = [
   { key: 'numero', label: 'Factura' },
@@ -24,6 +24,8 @@ export default function Facturas() {
   const [clientesAbiertos, setClientesAbiertos] = useState({})
   const [form, setForm] = useState({})
   const [items, setItems] = useState([])
+  const [montoManual, setMontoManual] = useState(false)
+  const [montoValor, setMontoValor] = useState('')
   const [editId, setEditId] = useState(null)
   const [nuevoClienteNombre, setNuevoClienteNombre] = useState('')
   const [nuevoClienteTel, setNuevoClienteTel] = useState('')
@@ -61,12 +63,25 @@ export default function Facturas() {
   }
 
   const toggleCliente = (id) => setClientesAbiertos(prev => ({ ...prev, [id]: !prev[id] }))
-
-  const descargarPDF = async (f) => {
-    const its = await loadItems(f.id)
-    const cliente = clientes.find(c => c.id === f.cliente_id)
-    generarFacturaPDF({ factura: f, cliente, items: its, totalPagado: f.total_pagado })
+  const toggleTodosClientes = (grupos) => {
+    const todosAbiertos = grupos.length > 0 && grupos.every(g => clientesAbiertos[g.cliente_id])
+    if (todosAbiertos) { setClientesAbiertos({}); return }
+    const next = {}
+    grupos.forEach(g => { next[g.cliente_id] = true })
+    setClientesAbiertos(next)
   }
+
+  // Trae items, cliente y el historial de pagos de una factura y descarga el PDF completo
+  const generarPDFCompleto = async (f) => {
+    const [its, { data: pagosData }] = await Promise.all([
+      loadItems(f.id),
+      supabase.from('pagos').select('monto, fecha, metodo').eq('factura_id', f.id).order('fecha'),
+    ])
+    const cliente = clientes.find(c => c.id === f.cliente_id)
+    generarFacturaPDF({ factura: f, cliente, items: its, totalPagado: f.total_pagado, pagos: pagosData || [] })
+  }
+
+  const descargarPDF = (f) => generarPDFCompleto(f)
 
   const openNueva = () => {
     setEditId(null)
@@ -78,6 +93,8 @@ export default function Facturas() {
       descripcion: '',
     })
     setItems([{ id: Date.now(), descripcion: '', cantidad: 1, precio_unitario: '' }])
+    setMontoManual(false)
+    setMontoValor('')
     setModal('nueva')
   }
 
@@ -95,6 +112,11 @@ export default function Facturas() {
       ? its.map(i => ({ id: i.id, descripcion: i.descripcion, cantidad: i.cantidad, precio_unitario: i.precio_unitario }))
       : [{ id: Date.now(), descripcion: '', cantidad: 1, precio_unitario: '' }]
     )
+    // Si el monto guardado no coincide con la suma de los items, es porque el usuario lo ajusto manualmente antes
+    const sumaItems = its.reduce((s, i) => s + (parseFloat(i.cantidad) || 0) * (parseFloat(i.precio_unitario) || 0), 0)
+    const difiere = Math.abs(Number(f.monto) - sumaItems) > 0.01
+    setMontoManual(difiere)
+    setMontoValor(difiere ? String(f.monto) : '')
     setModal('nueva')
   }
 
@@ -116,47 +138,60 @@ export default function Facturas() {
   const updateItem = (id, key, value) => setItems(prev => prev.map(i => i.id === id ? { ...i, [key]: value } : i))
   const totalItems = items.reduce((s, i) => s + (parseFloat(i.cantidad) || 0) * (parseFloat(i.precio_unitario) || 0), 0)
 
+  const montoFinal = montoManual ? (parseFloat(montoValor) || 0) : totalItems
+
   const guardar = async () => {
     if (!form.numero || !form.cliente_id || !form.fecha_emision || !form.fecha_vencimiento) {
       alert('Completa todos los campos obligatorios'); return
     }
     const itemsValidos = items.filter(i => i.descripcion.trim() && i.precio_unitario)
-    if (itemsValidos.length === 0) { alert('Agrega al menos un producto a la factura'); return }
+    if (montoFinal <= 0) { alert('Ingresa el total de la factura o agrega productos con precio'); return }
     setSaving(true)
+    let facturaId = editId
 
     if (editId) {
       // Editar factura existente
       const { error } = await supabase.from('facturas').update({
         numero: form.numero, cliente_id: form.cliente_id,
         fecha_emision: form.fecha_emision, fecha_vencimiento: form.fecha_vencimiento,
-        monto: totalItems, descripcion: form.descripcion,
+        monto: montoFinal, descripcion: form.descripcion,
       }).eq('id', editId)
       if (error) { alert('Error: ' + error.message); setSaving(false); return }
 
       // Reemplazar items: borrar los viejos e insertar los nuevos
       await supabase.from('factura_items').delete().eq('factura_id', editId)
-      await supabase.from('factura_items').insert(
-        itemsValidos.map(i => ({
-          factura_id: editId, descripcion: i.descripcion.trim(),
-          cantidad: parseFloat(i.cantidad) || 1, precio_unitario: parseFloat(i.precio_unitario),
-        }))
-      )
+      if (itemsValidos.length > 0) {
+        await supabase.from('factura_items').insert(
+          itemsValidos.map(i => ({
+            factura_id: editId, descripcion: i.descripcion.trim(),
+            cantidad: parseFloat(i.cantidad) || 1, precio_unitario: parseFloat(i.precio_unitario),
+          }))
+        )
+      }
       setItemsMap(prev => { const c = { ...prev }; delete c[editId]; return c })
     } else {
       // Crear factura nueva
       const { data: factura, error } = await supabase.from('facturas').insert({
         numero: form.numero, cliente_id: form.cliente_id,
         fecha_emision: form.fecha_emision, fecha_vencimiento: form.fecha_vencimiento,
-        monto: totalItems, descripcion: form.descripcion,
+        monto: montoFinal, descripcion: form.descripcion,
       }).select().single()
       if (error) { alert('Error: ' + error.message); setSaving(false); return }
-      await supabase.from('factura_items').insert(
-        itemsValidos.map(i => ({
-          factura_id: factura.id, descripcion: i.descripcion.trim(),
-          cantidad: parseFloat(i.cantidad) || 1, precio_unitario: parseFloat(i.precio_unitario),
-        }))
-      )
+      if (itemsValidos.length > 0) {
+        await supabase.from('factura_items').insert(
+          itemsValidos.map(i => ({
+            factura_id: factura.id, descripcion: i.descripcion.trim(),
+            cantidad: parseFloat(i.cantidad) || 1, precio_unitario: parseFloat(i.precio_unitario),
+          }))
+        )
+      }
+      facturaId = factura.id
     }
+
+    // Descarga automatica del PDF con los datos ya actualizados (monto, items, saldo)
+    const { data: facturaActualizada } = await supabase.from('facturas_resumen').select('*').eq('id', facturaId).single()
+    if (facturaActualizada) await generarPDFCompleto(facturaActualizada)
+
     setSaving(false); setModal(null); setEditId(null); load()
   }
 
@@ -175,10 +210,11 @@ export default function Facturas() {
     return dias
   }
 
-  // Filtro por estado, incluyendo "con abono" como caso especial
+  // Filtro por estado, incluyendo "con abono" y "por cobrar" como casos especiales
   const matchesEstado = (f) => {
     if (!filtroEstado) return true
     if (filtroEstado === 'abono') return f.estado !== 'pagada' && Number(f.total_pagado) > 0
+    if (filtroEstado === 'porCobrar') return f.estado !== 'pagada'
     return f.estado === filtroEstado
   }
 
@@ -193,10 +229,11 @@ export default function Facturas() {
   const grupos = useMemo(() => {
     const map = {}
     filtered.forEach(f => {
-      if (!map[f.cliente_id]) map[f.cliente_id] = { cliente_id: f.cliente_id, nombre: f.cliente_nombre, facturas: [], pendiente: 0, total: 0 }
+      if (!map[f.cliente_id]) map[f.cliente_id] = { cliente_id: f.cliente_id, nombre: f.cliente_nombre, facturas: [], pendiente: 0, total: 0, pagado: 0 }
       map[f.cliente_id].facturas.push(f)
       map[f.cliente_id].pendiente += Number(f.saldo_pendiente)
       map[f.cliente_id].total += Number(f.monto)
+      map[f.cliente_id].pagado += Number(f.total_pagado)
     })
     let arr = Object.values(map)
     const { key, dir } = ordenClientes
@@ -243,23 +280,63 @@ export default function Facturas() {
   const total = filtered.reduce((s, f) => s + Number(f.monto), 0)
   const cobrado = filtered.reduce((s, f) => s + Number(f.total_pagado), 0)
 
-  if (loading) return <div className="loading-page"><div className="spinner" /></div>
+  if (loading) return (
+    <div>
+      <div className="skel-metrics">
+        {[0,1,2,3].map(i => (
+          <div key={i} className="skel-metric">
+            <div className="skeleton skel-line" style={{ width: '50%' }} />
+            <div className="skeleton skel-line" style={{ width: '75%', height: 18, marginBottom: 0 }} />
+          </div>
+        ))}
+      </div>
+      {[0,1,2,3,4].map(i => <div key={i} className="skel-row"><div className="skeleton skel-line" style={{ width: '40%', marginBottom: 0 }} /></div>)}
+    </div>
+  )
 
-  const SortIcon = ({ active, dir }) => !active ? null : (dir === 'asc' ? <ArrowUp size={11} /> : <ArrowDown size={11} />)
+  const tipoDeCampo = (key) => key.includes('fecha') ? 'fecha' : (key === 'monto' || key === 'pendiente' || key === 'total') ? 'monto' : 'texto'
+  const textoOrden = (key, dir) => {
+    const tipo = tipoDeCampo(key)
+    if (tipo === 'fecha') return dir === 'asc' ? 'antiguas primero' : 'recientes primero'
+    if (tipo === 'monto') return dir === 'asc' ? 'menor a mayor' : 'mayor a menor'
+    return dir === 'asc' ? 'A-Z' : 'Z-A'
+  }
+  const OrdenLabel = ({ active, campo, dir }) => !active ? null : (
+    <span style={{ fontSize: 10.5, fontWeight: 500, opacity: .85 }}> · {textoOrden(campo, dir)}</span>
+  )
 
   return (
     <div>
-      <div className="metrics">
-        <div className="metric"><div className="metric-label">Total</div><div className="metric-value">{fmt(total)}</div></div>
-        <div className="metric"><div className="metric-label">Cobrado</div><div className="metric-value" style={{ color: '#1D9E75' }}>{fmt(cobrado)}</div></div>
-        <div className="metric"><div className="metric-label">Por cobrar</div><div className="metric-value" style={{ color: '#854F0B' }}>{fmt(total - cobrado)}</div></div>
-        <div className="metric"><div className="metric-label">Vencidas</div><div className="metric-value" style={{ color: '#A32D2D' }}>{filtered.filter(f => f.estado === 'vencida').length}</div></div>
+      <div className="metrics stagger-in">
+        <div className="metric metric-brand"><div className="metric-label"><Receipt size={15} /> Total</div><div className="metric-value">{fmt(total)}</div></div>
+        <div className="metric metric-success"><div className="metric-label"><CheckCircle size={15} /> Cobrado</div><div className="metric-value" style={{ color: 'var(--green-dark)' }}>{fmt(cobrado)}</div></div>
+        <div
+          className={`metric metric-warn${filtroEstado === 'porCobrar' ? ' metric-active' : ''}`}
+          role="button" tabIndex={0}
+          onClick={() => setFiltroEstado(filtroEstado === 'porCobrar' ? '' : 'porCobrar')}
+          onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && setFiltroEstado(filtroEstado === 'porCobrar' ? '' : 'porCobrar')}
+          title="Ver solo facturas por cobrar"
+        >
+          <div className="metric-label"><Clock size={15} /> Por cobrar</div>
+          <div className="metric-value">{fmt(total - cobrado)}</div>
+        </div>
+        <div
+          className={`metric metric-danger${filtroEstado === 'vencida' ? ' metric-active' : ''}`}
+          role="button" tabIndex={0}
+          onClick={() => setFiltroEstado(filtroEstado === 'vencida' ? '' : 'vencida')}
+          onKeyDown={e => (e.key === 'Enter' || e.key === ' ') && setFiltroEstado(filtroEstado === 'vencida' ? '' : 'vencida')}
+          title="Ver solo facturas vencidas"
+        >
+          <div className="metric-label"><AlertTriangle size={15} /> Vencidas</div>
+          <div className="metric-value">{filtered.filter(f => f.estado === 'vencida').length}</div>
+        </div>
       </div>
 
       <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
         <input placeholder="Buscar cliente o factura..." value={filtro} onChange={e => setFiltro(e.target.value)} style={{ flex: 1, minWidth: 0, height: 38 }} />
         <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ width: 'auto', height: 38 }}>
           <option value="">Todos los estados</option>
+          <option value="porCobrar">Por cobrar</option>
           <option value="pagada">Pagadas</option>
           <option value="pendiente">Pendientes</option>
           <option value="vencida">Vencidas</option>
@@ -271,21 +348,28 @@ export default function Facturas() {
       </div>
 
       {/* Ordenar clientes */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap' }}>
-        <button
-          className="btn btn-sm"
-          style={{ fontWeight: vista === 'agrupado' ? 700 : 500, background: vista === 'agrupado' ? 'var(--green-light)' : '#fff', color: vista === 'agrupado' ? 'var(--green-dark)' : 'var(--gray-700)' }}
-          onClick={() => setVista('agrupado')}
-        >
-          Agrupado por cliente
-        </button>
-        <button
-          className="btn btn-sm"
-          style={{ fontWeight: vista === 'lista' ? 700 : 500, background: vista === 'lista' ? 'var(--green-light)' : '#fff', color: vista === 'lista' ? 'var(--green-dark)' : 'var(--gray-700)' }}
-          onClick={() => setVista('lista')}
-        >
-          Lista completa (ordenar todo junto)
-        </button>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center', flexWrap: 'wrap', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          <button
+            className="btn btn-sm"
+            style={{ fontWeight: vista === 'agrupado' ? 700 : 500, background: vista === 'agrupado' ? 'var(--blue-light)' : '#fff', color: vista === 'agrupado' ? 'var(--blue)' : 'var(--gray-700)' }}
+            onClick={() => setVista('agrupado')}
+          >
+            Agrupado por cliente
+          </button>
+          <button
+            className="btn btn-sm"
+            style={{ fontWeight: vista === 'lista' ? 700 : 500, background: vista === 'lista' ? 'var(--blue-light)' : '#fff', color: vista === 'lista' ? 'var(--blue)' : 'var(--gray-700)' }}
+            onClick={() => setVista('lista')}
+          >
+            Lista completa (ordenar todo junto)
+          </button>
+        </div>
+        {vista === 'agrupado' && grupos.length > 0 && (
+          <button className="btn btn-sm" onClick={() => toggleTodosClientes(grupos)}>
+            {grupos.every(g => clientesAbiertos[g.cliente_id]) ? 'Colapsar todos' : 'Expandir todos'}
+          </button>
+        )}
       </div>
 
       {vista === 'agrupado' && (
@@ -300,10 +384,10 @@ export default function Facturas() {
           <button
             key={o.key}
             className="btn btn-sm"
-            style={{ fontWeight: ordenClientes.key === o.key ? 700 : 500, background: ordenClientes.key === o.key ? 'var(--green-light)' : '#fff', color: ordenClientes.key === o.key ? 'var(--green-dark)' : 'var(--gray-700)' }}
+            style={{ fontWeight: ordenClientes.key === o.key ? 700 : 500, background: ordenClientes.key === o.key ? 'var(--blue-light)' : '#fff', color: ordenClientes.key === o.key ? 'var(--blue)' : 'var(--gray-700)' }}
             onClick={() => toggleOrdenClientes(o.key)}
           >
-            {o.label} <SortIcon active={ordenClientes.key === o.key} dir={ordenClientes.dir} />
+            {o.label}<OrdenLabel active={ordenClientes.key === o.key} campo={o.key} dir={ordenClientes.dir} />
           </button>
         ))}
       </div>
@@ -318,7 +402,7 @@ export default function Facturas() {
             style={{ fontWeight: ordenFacturas.key === c.key ? 700 : 500, background: ordenFacturas.key === c.key ? 'var(--blue-light)' : '#fff', color: ordenFacturas.key === c.key ? 'var(--blue)' : 'var(--gray-700)' }}
             onClick={() => toggleOrdenFacturas(c.key)}
           >
-            {c.label} <SortIcon active={ordenFacturas.key === c.key} dir={ordenFacturas.dir} />
+            {c.label}<OrdenLabel active={ordenFacturas.key === c.key} campo={c.key} dir={ordenFacturas.dir} />
           </button>
         ))}
       </div>
@@ -328,26 +412,45 @@ export default function Facturas() {
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {grupos.map(g => {
-            const abierto = clientesAbiertos[g.cliente_id] !== false // abierto por defecto
+            const abierto = !!clientesAbiertos[g.cliente_id] // cerrado por defecto
+            const pctCumplimiento = g.total > 0 ? Math.min(100, Math.round(g.pagado / g.total * 100)) : 100
+            const alDia = g.pendiente <= 0
             return (
               <div key={g.cliente_id} className="card" style={{ marginBottom: 0 }}>
                 <div
                   onClick={() => toggleCliente(g.cliente_id)}
-                  style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '14px 16px', cursor: 'pointer', flexWrap: 'wrap', gap: 8 }}
+                  style={{ padding: '11px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 0 }}>
                     {abierto ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                    <span style={{ fontWeight: 700, fontSize: 16, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.nombre}</span>
-                    <span style={{ fontSize: 12, color: 'var(--gray-500)', whiteSpace: 'nowrap' }}>· {g.facturas.length} factura{g.facturas.length !== 1 ? 's' : ''}</span>
+                    <span style={{ fontWeight: 700, fontSize: 15, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{g.nombre}</span>
+                    <span style={{ fontSize: 11.5, color: 'var(--gray-500)', whiteSpace: 'nowrap' }}>· {g.facturas.length} fact.</span>
                   </div>
-                  <div style={{ textAlign: 'right', flexShrink: 0 }}>
-                    {g.pendiente > 0 ? (
-                      <span style={{ fontWeight: 700, color: '#854F0B', fontSize: 14 }}>{fmt(g.pendiente)} pendiente</span>
-                    ) : (
-                      <span style={{ fontWeight: 700, color: '#1D9E75', fontSize: 14 }}>Al día</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
+                    {!alDia && (
+                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12, whiteSpace: 'nowrap' }}>
+                        <span style={{ color: 'var(--gray-500)' }}>Fact. <b style={{ color: 'var(--gray-900)', fontVariantNumeric: 'tabular-nums' }}>{fmt(g.total)}</b></span>
+                        <span style={{ color: 'var(--gray-300)' }}>|</span>
+                        <span style={{ color: 'var(--green-dark)' }}>Pag. <b style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(g.pagado)}</b></span>
+                        <span style={{ color: 'var(--gray-300)' }}>|</span>
+                        <span style={{ color: 'var(--warn-ink)' }}>Pend. <b style={{ fontVariantNumeric: 'tabular-nums' }}>{fmt(g.pendiente)}</b></span>
+                      </div>
                     )}
+                    <span style={{
+                      fontSize: 11, fontWeight: 700, padding: '3px 9px', borderRadius: 20, whiteSpace: 'nowrap',
+                      background: alDia ? 'var(--green-light)' : 'var(--danger-grad-to)',
+                      color: alDia ? 'var(--green-dark)' : 'var(--danger-label)',
+                    }}>
+                      {pctCumplimiento}%
+                    </span>
                   </div>
                 </div>
+
+                {!alDia && (
+                  <div style={{ height: 3, background: 'var(--gray-200)' }}>
+                    <div style={{ height: '100%', width: pctCumplimiento + '%', background: 'linear-gradient(90deg, #34D399, var(--green-dark))' }} />
+                  </div>
+                )}
 
                 {abierto && (
                   <div className="table-wrapper" style={{ borderTop: '1px solid var(--gray-200)' }}>
@@ -444,7 +547,7 @@ export default function Facturas() {
             style={{ fontWeight: ordenFacturas.key === c.key ? 700 : 500, background: ordenFacturas.key === c.key ? 'var(--blue-light)' : '#fff', color: ordenFacturas.key === c.key ? 'var(--blue)' : 'var(--gray-700)' }}
             onClick={() => toggleOrdenFacturas(c.key)}
           >
-            {c.label} <SortIcon active={ordenFacturas.key === c.key} dir={ordenFacturas.dir} />
+            {c.label}<OrdenLabel active={ordenFacturas.key === c.key} campo={c.key} dir={ordenFacturas.dir} />
           </button>
         ))}
       </div>
@@ -582,12 +685,34 @@ export default function Facturas() {
                   ))}
                 </div>
                 <button className="btn btn-sm" style={{ width: '100%', justifyContent: 'center', marginTop: 10 }} onClick={addItem}><Plus size={13} /> Agregar otro producto</button>
-                {totalItems > 0 && (
-                  <div style={{ background: 'var(--green-light)', borderRadius: 'var(--radius)', padding: '10px 14px', marginTop: 10, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                    <span style={{ fontWeight: 600, color: 'var(--green-dark)' }}>Total factura</span>
-                    <span style={{ fontWeight: 700, fontSize: 16, color: 'var(--green-dark)' }}>{fmt(totalItems)}</span>
+
+                <div style={{ background: 'var(--green-light)', borderRadius: 'var(--radius)', padding: '12px 14px', marginTop: 10 }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: montoManual ? 8 : 0 }}>
+                    <span style={{ fontWeight: 600, color: 'var(--green-dark)', fontSize: 13 }}>Total factura</span>
+                    {totalItems > 0 && (
+                      <span style={{ fontSize: 11.5, color: 'var(--green-dark)' }}>
+                        Sugerido por productos: <strong>{fmt(totalItems)}</strong>
+                      </span>
+                    )}
                   </div>
-                )}
+                  <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                    <input
+                      type="number"
+                      value={montoManual ? montoValor : totalItems || ''}
+                      onChange={e => { setMontoManual(true); setMontoValor(e.target.value) }}
+                      placeholder="0"
+                      style={{ background: '#fff', fontWeight: 700, fontSize: 16, color: 'var(--green-dark)' }}
+                    />
+                    {montoManual && (
+                      <button type="button" className="btn btn-sm" onClick={() => { setMontoManual(false); setMontoValor('') }} title="Usar el total sugerido por los productos">
+                        Usar sugerido
+                      </button>
+                    )}
+                  </div>
+                  {montoManual && (
+                    <div style={{ fontSize: 11, color: 'var(--amber)', marginTop: 6 }}>Total editado manualmente — no coincide con la suma de productos.</div>
+                  )}
+                </div>
               </div>
               <div className="form-group"><label>Notas</label><textarea value={form.descripcion} onChange={e => set('descripcion', e.target.value)} placeholder="Notas opcionales..." rows={2} /></div>
             </div>
@@ -630,6 +755,10 @@ export default function Facturas() {
           </div>
         </div>
       )}
+
+      <button className="fab" onClick={openNueva} title="Nueva factura" aria-label="Nueva factura">
+        <Plus size={24} />
+      </button>
     </div>
   )
 }
