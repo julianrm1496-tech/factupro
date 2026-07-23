@@ -30,3 +30,38 @@ export const nextFacturaNumber = (facturas = []) => {
   const next = nums.length ? Math.max(...nums) + 1 : 1
   return `FAC-${String(next).padStart(3, '0')}`
 }
+
+// Suma un mes a una fecha YYYY-MM-DD (ajusta si el dia no existe en el mes destino)
+export const sumarUnMes = (fechaStr) => {
+  if (!fechaStr) return ''
+  const [y, m, d] = fechaStr.split('-').map(Number)
+  if (!y || !m || !d) return ''
+  const destinoMes = m === 12 ? 1 : m + 1
+  const destinoAnio = m === 12 ? y + 1 : y
+  const ultimoDiaDestino = new Date(destinoAnio, destinoMes, 0).getDate()
+  const dia = Math.min(d, ultimoDiaDestino)
+  return `${destinoAnio}-${String(destinoMes).padStart(2, '0')}-${String(dia).padStart(2, '0')}`
+}
+
+// Normaliza un telefono colombiano a formato internacional para wa.me
+export const telefonoWhatsapp = (telefono) => {
+  if (!telefono) return null
+  const solo = String(telefono).replace(/\D/g, '')
+  if (!solo) return null
+  if (solo.startsWith('57')) return solo
+  if (solo.length === 10) return '57' + solo
+  return solo
+}
+
+// Arma el link de WhatsApp con mensaje de recordatorio de pago
+export const linkRecordatorioPago = ({ cliente, factura, empresa = 'Deluxe' }) => {
+  const tel = telefonoWhatsapp(cliente?.telefono)
+  if (!tel) return null
+  const saldo = fmt(factura.saldo_pendiente ?? factura.monto)
+  const mensaje =
+    `Hola ${cliente?.nombre || ''}, te escribimos de ${empresa}. ` +
+    `Te recordamos que la factura ${factura.numero} por ${saldo} ` +
+    `vencio el ${fmtDate(factura.fecha_vencimiento)}. ` +
+    `Agradecemos tu pago. Gracias!`
+  return `https://wa.me/${tel}?text=${encodeURIComponent(mensaje)}`
+}

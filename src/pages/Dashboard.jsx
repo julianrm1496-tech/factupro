@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { fmt, fmtDate } from '../lib/utils'
-import { Receipt, CheckCircle, Clock, AlertTriangle, X, CreditCard } from 'lucide-react'
+import { Receipt, CheckCircle, Clock, AlertTriangle, X, CreditCard, TrendingUp, TrendingDown, ChevronRight } from 'lucide-react'
 import {
   BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, LabelList,
   PieChart, Pie, Cell
@@ -10,6 +11,7 @@ import {
 const COLORS = { pagada: '#1D9E75', pendiente: '#F59E0B', vencida: '#EF4444' }
 
 export default function Dashboard() {
+  const navigate = useNavigate()
   const [data, setData] = useState(null)
   const [loading, setLoading] = useState(true)
   const [panel, setPanel] = useState(null) // null | 'porCobrar' | 'vencidas'
@@ -70,9 +72,20 @@ export default function Dashboard() {
     cobrado: v,
   }))
 
+  // Comparacion de lo cobrado este mes contra el mes anterior
+  const hoyRef = new Date()
+  const claveMes = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+  const mesActualKey = claveMes(hoyRef)
+  const mesAnteriorKey = claveMes(new Date(hoyRef.getFullYear(), hoyRef.getMonth() - 1, 1))
+  const cobradoMesActual = mesMap[mesActualKey] || 0
+  const cobradoMesAnterior = mesMap[mesAnteriorKey] || 0
+  const variacionMes = cobradoMesAnterior > 0
+    ? Math.round((cobradoMesActual - cobradoMesAnterior) / cobradoMesAnterior * 100)
+    : null
+
   const porCliente = {}
   facturas.forEach(f => {
-    if (!porCliente[f.cliente_id]) porCliente[f.cliente_id] = { nombre: f.cliente_nombre, pendiente: 0 }
+    if (!porCliente[f.cliente_id]) porCliente[f.cliente_id] = { cliente_id: f.cliente_id, nombre: f.cliente_nombre, pendiente: 0 }
     porCliente[f.cliente_id].pendiente += Number(f.saldo_pendiente)
   })
   const topClientes = Object.values(porCliente).filter(c => c.pendiente > 0).sort((a, b) => b.pendiente - a.pendiente).slice(0, 5)
@@ -103,7 +116,15 @@ export default function Dashboard() {
         <div className="metric metric-success">
           <div className="metric-label"><CheckCircle size={15} /> Cobrado</div>
           <div className="metric-value" style={{ color: 'var(--green-dark)' }}>{fmt(totalCobrado)}</div>
-          <div className="metric-sub">{totalFacturado > 0 ? Math.round(totalCobrado / totalFacturado * 100) : 0}% del total</div>
+          <div className="metric-sub" style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+            <span>{totalFacturado > 0 ? Math.round(totalCobrado / totalFacturado * 100) : 0}% del total</span>
+            {variacionMes !== null && (
+              <span className={`trend ${variacionMes >= 0 ? 'trend-up' : 'trend-down'}`} title={`Cobrado este mes: ${fmt(cobradoMesActual)} · mes anterior: ${fmt(cobradoMesAnterior)}`}>
+                {variacionMes >= 0 ? <TrendingUp size={12} /> : <TrendingDown size={12} />}
+                {Math.abs(variacionMes)}% vs mes pasado
+              </span>
+            )}
+          </div>
         </div>
         <div
           className="metric metric-warn"
@@ -159,7 +180,7 @@ export default function Dashboard() {
                       <span style={{ fontWeight: 700, fontSize: 14, color: 'var(--amber)' }}>{fmt(f.saldo_pendiente)}</span>
                       <button
                         className="btn btn-primary btn-sm"
-                        onClick={() => window.location.href = '/pagos?factura=' + f.id}
+                        onClick={() => navigate('/pagos?factura=' + f.id)}
                         title="Registrar pago"
                       >
                         <CreditCard size={13} />
@@ -262,10 +283,18 @@ export default function Dashboard() {
             {topClientes.length === 0 ? <div className="empty">Sin pendientes</div> : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                 {topClientes.map((c, i) => (
-                  <div key={i}>
-                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4 }}>
-                      <span style={{ fontSize: 13, fontWeight: 500 }}>{c.nombre}</span>
-                      <span style={{ fontSize: 13, fontWeight: 700, color: '#854F0B' }}>{fmt(c.pendiente)}</span>
+                  <div
+                    key={i}
+                    onClick={() => navigate('/facturas?cliente=' + c.cliente_id)}
+                    style={{ cursor: 'pointer' }}
+                    title={`Ver facturas de ${c.nombre}`}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 4, gap: 8 }}>
+                      <span style={{ fontSize: 13, fontWeight: 500, display: 'flex', alignItems: 'center', gap: 3, minWidth: 0 }}>
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{c.nombre}</span>
+                        <ChevronRight size={13} style={{ color: 'var(--gray-500)', flexShrink: 0 }} />
+                      </span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--warn-ink)', whiteSpace: 'nowrap' }}>{fmt(c.pendiente)}</span>
                     </div>
                     <div style={{ height: 8, background: 'var(--gray-100)', borderRadius: 4, overflow: 'hidden' }}>
                       <div style={{
@@ -289,7 +318,7 @@ export default function Dashboard() {
               <div style={{ display: 'flex', gap: 4 }}>
                 <button
                   className="btn btn-sm"
-                  style={{ fontWeight: ordenVencidas === 'urgencia' ? 700 : 500, background: ordenVencidas === 'urgencia' ? 'var(--blue-light)' : '#fff', color: ordenVencidas === 'urgencia' ? 'var(--blue)' : 'var(--gray-700)' }}
+                  style={{ fontWeight: ordenVencidas === 'urgencia' ? 700 : 500, background: ordenVencidas === 'urgencia' ? 'var(--blue-light)' : 'var(--surface)', color: ordenVencidas === 'urgencia' ? 'var(--blue)' : 'var(--gray-700)' }}
                   onClick={() => setOrdenVencidas('urgencia')}
                   title="Mas antiguas primero (mas urgentes)"
                 >
@@ -297,7 +326,7 @@ export default function Dashboard() {
                 </button>
                 <button
                   className="btn btn-sm"
-                  style={{ fontWeight: ordenVencidas === 'monto' ? 700 : 500, background: ordenVencidas === 'monto' ? 'var(--blue-light)' : '#fff', color: ordenVencidas === 'monto' ? 'var(--blue)' : 'var(--gray-700)' }}
+                  style={{ fontWeight: ordenVencidas === 'monto' ? 700 : 500, background: ordenVencidas === 'monto' ? 'var(--blue-light)' : 'var(--surface)', color: ordenVencidas === 'monto' ? 'var(--blue)' : 'var(--gray-700)' }}
                   onClick={() => setOrdenVencidas('monto')}
                   title="Mayor monto primero"
                 >
@@ -308,19 +337,19 @@ export default function Dashboard() {
           </div>
           <div className="card-body">
             {recentesVencidas.length === 0 ? (
-              <div className="empty" style={{ color: '#1D9E75' }}>Sin facturas vencidas</div>
+              <div className="empty" style={{ color: 'var(--green)' }}>Sin facturas vencidas</div>
             ) : (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
                 {recentesVencidas.map(f => (
-                  <div key={f.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: '#FEF2F2', borderRadius: 8, gap: 8 }}>
+                  <div key={f.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', padding: '8px 10px', background: 'var(--surface-danger)', border: '1px solid var(--surface-danger-border)', borderRadius: 8, gap: 8 }}>
                     <div style={{ minWidth: 0 }}>
                       <div style={{ fontWeight: 600, fontSize: 13 }}>{f.numero}</div>
                       <div style={{ fontSize: 12, color: 'var(--gray-500)' }}>{f.cliente_nombre}</div>
-                      <div style={{ fontSize: 11, color: '#A32D2D', marginTop: 2 }}>
+                      <div style={{ fontSize: 11, color: 'var(--danger-label)', marginTop: 2 }}>
                         Vence: {fmtDate(f.fecha_vencimiento)} · hace {diasVencida(f.fecha_vencimiento)}d
                       </div>
                     </div>
-                    <div style={{ fontWeight: 700, color: '#A32D2D', fontSize: 13, whiteSpace: 'nowrap' }}>{fmt(f.saldo_pendiente)}</div>
+                    <div style={{ fontWeight: 700, color: 'var(--danger-label)', fontSize: 13, whiteSpace: 'nowrap' }}>{fmt(f.saldo_pendiente)}</div>
                   </div>
                 ))}
               </div>

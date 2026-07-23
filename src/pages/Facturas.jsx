@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from 'react'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
-import { fmt, fmtDate, nextFacturaNumber, today } from '../lib/utils'
+import { fmt, fmtDate, nextFacturaNumber, today, sumarUnMes, linkRecordatorioPago } from '../lib/utils'
 import { generarFacturaPDF } from '../lib/pdf'
-import { Plus, Trash2, CreditCard, ChevronDown, ChevronRight, FileDown, Pencil, UserPlus, Receipt, CheckCircle, Clock, AlertTriangle } from 'lucide-react'
+import { useUI } from '../hooks/useUI'
+import { usePersistedState } from '../hooks/usePersistedState'
+import { Plus, Trash2, CreditCard, ChevronDown, ChevronRight, FileDown, Pencil, UserPlus, Receipt, CheckCircle, Clock, AlertTriangle, MessageCircle, FileText } from 'lucide-react'
 
 const COLS = [
   { key: 'numero', label: 'Factura' },
@@ -12,6 +15,9 @@ const COLS = [
 ]
 
 export default function Facturas() {
+  const location = useLocation()
+  const navigate = useNavigate()
+  const { toast, confirmar } = useUI()
   const [facturas, setFacturas] = useState([])
   const [clientes, setClientes] = useState([])
   const [loading, setLoading] = useState(true)
@@ -21,7 +27,9 @@ export default function Facturas() {
   const [saving, setSaving] = useState(false)
   const [itemsMap, setItemsMap] = useState({})
   const [expandidaFactura, setExpandidaFactura] = useState(null)
+  const [facturaResaltada, setFacturaResaltada] = useState(null)
   const [clientesAbiertos, setClientesAbiertos] = useState({})
+  const [clienteResaltado, setClienteResaltado] = useState(null)
   const [form, setForm] = useState({})
   const [items, setItems] = useState([])
   const [montoManual, setMontoManual] = useState(false)
@@ -31,12 +39,45 @@ export default function Facturas() {
   const [nuevoClienteTel, setNuevoClienteTel] = useState('')
   const [creandoCliente, setCreandoCliente] = useState(false)
 
-  // Ordenamiento
-  const [ordenClientes, setOrdenClientes] = useState({ key: 'pendiente', dir: 'desc' })
-  const [ordenFacturas, setOrdenFacturas] = useState({ key: 'fecha_emision', dir: 'desc' })
-  const [vista, setVista] = useState('agrupado') // agrupado | lista
+  // Ordenamiento (se recuerda entre sesiones)
+  const [ordenClientes, setOrdenClientes] = usePersistedState('fact-orden-clientes', { key: 'pendiente', dir: 'desc' })
+  const [ordenFacturas, setOrdenFacturas] = usePersistedState('fact-orden-facturas', { key: 'fecha_emision', dir: 'desc' })
+  const [vista, setVista] = usePersistedState('fact-vista', 'agrupado') // agrupado | lista
 
   useEffect(() => { load() }, [])
+
+  // Deep-links: ?factura=ID (desde Pagos) o ?cliente=ID (desde Clientes / búsqueda global)
+  useEffect(() => {
+    if (loading) return
+    const params = new URLSearchParams(location.search)
+    const facId = params.get('factura')
+    const cliId = params.get('cliente')
+
+    if (facId) {
+      const f = facturas.find(x => x.id === facId)
+      if (!f) return
+      setVista('agrupado')
+      setClientesAbiertos(prev => ({ ...prev, [f.cliente_id]: true }))
+      toggleFactura(facId)
+      setFacturaResaltada(facId)
+      setTimeout(() => {
+        document.getElementById('factura-row-' + facId)?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }, 150)
+      setTimeout(() => setFacturaResaltada(null), 2500)
+      return
+    }
+
+    if (cliId) {
+      setVista('agrupado')
+      setFiltroEstado('')
+      setClientesAbiertos({ [cliId]: true })
+      setClienteResaltado(cliId)
+      setTimeout(() => {
+        document.getElementById('cliente-grupo-' + cliId)?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }, 150)
+      setTimeout(() => setClienteResaltado(null), 2500)
+    }
+  }, [location.search, loading])
 
   const load = async () => {
     setLoading(true)
@@ -81,7 +122,28 @@ export default function Facturas() {
     generarFacturaPDF({ factura: f, cliente, items: its, totalPagado: f.total_pagado, pagos: pagosData || [] })
   }
 
-  const descargarPDF = (f) => generarPDFCompleto(f)
+  const descargarPDF = async (f) => {
+    await generarPDFCompleto(f)
+    toast(`PDF de ${f.numero} descargado`)
+  }
+
+  // Abre WhatsApp con un recordatorio de pago ya redactado
+  const recordarPorWhatsapp = (f) => {
+    const cliente = clientes.find(c => c.id === f.cliente_id)
+    const link = linkRecordatorioPago({ cliente, factura: f })
+    if (!link) {
+      toast(`${cliente?.nombre || 'El cliente'} no tiene teléfono registrado`, { tipo: 'error', duracion: 5000 })
+      return
+    }
+    window.open(link, '_blank', 'noopener')
+  }
+
+  const tieneTelefono = (clienteId) => {
+    const c = clientes.find(x => x.id === clienteId)
+    return !!(c?.telefono && String(c.telefono).replace(/\D/g, ''))
+  }
+
+  const verPagosDeFactura = (f) => navigate('/pagos?factura=' + f.id)
 
   const openNueva = () => {
     setEditId(null)
@@ -89,7 +151,7 @@ export default function Facturas() {
       numero: nextFacturaNumber(facturas),
       cliente_id: clientes[0]?.id || '',
       fecha_emision: today(),
-      fecha_vencimiento: '',
+      fecha_vencimiento: sumarUnMes(today()),
       descripcion: '',
     })
     setItems([{ id: Date.now(), descripcion: '', cantidad: 1, precio_unitario: '' }])
@@ -121,11 +183,12 @@ export default function Facturas() {
   }
 
   const crearClienteRapido = async () => {
-    if (!nuevoClienteNombre.trim()) { alert('Escribe el nombre del cliente'); return }
+    if (!nuevoClienteNombre.trim()) { toast('Escribe el nombre del cliente', { tipo: 'error' }); return }
     setCreandoCliente(true)
     const { data, error } = await supabase.from('clientes').insert({ nombre: nuevoClienteNombre.trim(), telefono: nuevoClienteTel.trim() }).select().single()
     setCreandoCliente(false)
-    if (error) { alert('Error: ' + error.message); return }
+    if (error) { toast('Error: ' + error.message, { tipo: 'error', duracion: 5000 }); return }
+    toast(`Cliente "${data.nombre}" creado`)
     setClientes(prev => [...prev, data].sort((a, b) => a.nombre.localeCompare(b.nombre)))
     set('cliente_id', data.id)
     setNuevoClienteNombre('')
@@ -142,10 +205,10 @@ export default function Facturas() {
 
   const guardar = async () => {
     if (!form.numero || !form.cliente_id || !form.fecha_emision || !form.fecha_vencimiento) {
-      alert('Completa todos los campos obligatorios'); return
+      toast('Completa todos los campos obligatorios', { tipo: 'error' }); return
     }
     const itemsValidos = items.filter(i => i.descripcion.trim() && i.precio_unitario)
-    if (montoFinal <= 0) { alert('Ingresa el total de la factura o agrega productos con precio'); return }
+    if (montoFinal <= 0) { toast('Ingresa el total de la factura o agrega productos con precio', { tipo: 'error' }); return }
     setSaving(true)
     let facturaId = editId
 
@@ -156,7 +219,7 @@ export default function Facturas() {
         fecha_emision: form.fecha_emision, fecha_vencimiento: form.fecha_vencimiento,
         monto: montoFinal, descripcion: form.descripcion,
       }).eq('id', editId)
-      if (error) { alert('Error: ' + error.message); setSaving(false); return }
+      if (error) { toast('Error: ' + error.message, { tipo: 'error', duracion: 5000 }); setSaving(false); return }
 
       // Reemplazar items: borrar los viejos e insertar los nuevos
       await supabase.from('factura_items').delete().eq('factura_id', editId)
@@ -176,7 +239,7 @@ export default function Facturas() {
         fecha_emision: form.fecha_emision, fecha_vencimiento: form.fecha_vencimiento,
         monto: montoFinal, descripcion: form.descripcion,
       }).select().single()
-      if (error) { alert('Error: ' + error.message); setSaving(false); return }
+      if (error) { toast('Error: ' + error.message, { tipo: 'error', duracion: 5000 }); setSaving(false); return }
       if (itemsValidos.length > 0) {
         await supabase.from('factura_items').insert(
           itemsValidos.map(i => ({
@@ -192,16 +255,35 @@ export default function Facturas() {
     const { data: facturaActualizada } = await supabase.from('facturas_resumen').select('*').eq('id', facturaId).single()
     if (facturaActualizada) await generarPDFCompleto(facturaActualizada)
 
-    setSaving(false); setModal(null); setEditId(null); load()
-  }
-
-  const eliminar = async (id) => {
-    if (!confirm('¿Eliminar esta factura y todos sus pagos?')) return
-    await supabase.from('facturas').delete().eq('id', id)
+    setSaving(false); setModal(null); setEditId(null)
+    toast(`Factura ${form.numero} ${editId ? 'actualizada' : 'creada'} · PDF descargado`)
     load()
   }
 
-  const set = (k, v) => setForm(f => ({ ...f, [k]: v }))
+  const eliminar = async (factura) => {
+    const ok = await confirmar({
+      titulo: 'Eliminar factura',
+      mensaje: `Se eliminará la factura ${factura.numero} de ${factura.cliente_nombre} y todos sus pagos registrados.`,
+      textoConfirmar: 'Eliminar',
+    })
+    if (!ok) return
+    const { error } = await supabase.from('facturas').delete().eq('id', factura.id)
+    if (error) { toast('Error: ' + error.message, { tipo: 'error', duracion: 5000 }); return }
+    toast(`Factura ${factura.numero} eliminada`, { tipo: 'info' })
+    load()
+  }
+
+  const set = (k, v) => setForm(f => {
+    // Al elegir fecha de emision, sugerimos vencimiento a un mes.
+    // Solo se autocompleta si el vencimiento esta vacio o si aun coincide con la sugerencia anterior
+    // (asi respetamos cualquier fecha que el usuario haya escrito a mano).
+    if (k === 'fecha_emision') {
+      const sugeridoAntes = sumarUnMes(f.fecha_emision)
+      const debeSugerir = !f.fecha_vencimiento || f.fecha_vencimiento === sugeridoAntes
+      return { ...f, fecha_emision: v, fecha_vencimiento: debeSugerir ? sumarUnMes(v) : f.fecha_vencimiento }
+    }
+    return { ...f, [k]: v }
+  })
 
   const diasVencida = (fechaVencimiento) => {
     const hoy = new Date(); hoy.setHours(0, 0, 0, 0)
@@ -352,14 +434,14 @@ export default function Facturas() {
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
           <button
             className="btn btn-sm"
-            style={{ fontWeight: vista === 'agrupado' ? 700 : 500, background: vista === 'agrupado' ? 'var(--blue-light)' : '#fff', color: vista === 'agrupado' ? 'var(--blue)' : 'var(--gray-700)' }}
+            style={{ fontWeight: vista === 'agrupado' ? 700 : 500, background: vista === 'agrupado' ? 'var(--blue-light)' : 'var(--surface)', color: vista === 'agrupado' ? 'var(--blue)' : 'var(--gray-700)' }}
             onClick={() => setVista('agrupado')}
           >
             Agrupado por cliente
           </button>
           <button
             className="btn btn-sm"
-            style={{ fontWeight: vista === 'lista' ? 700 : 500, background: vista === 'lista' ? 'var(--blue-light)' : '#fff', color: vista === 'lista' ? 'var(--blue)' : 'var(--gray-700)' }}
+            style={{ fontWeight: vista === 'lista' ? 700 : 500, background: vista === 'lista' ? 'var(--blue-light)' : 'var(--surface)', color: vista === 'lista' ? 'var(--blue)' : 'var(--gray-700)' }}
             onClick={() => setVista('lista')}
           >
             Lista completa (ordenar todo junto)
@@ -384,7 +466,7 @@ export default function Facturas() {
           <button
             key={o.key}
             className="btn btn-sm"
-            style={{ fontWeight: ordenClientes.key === o.key ? 700 : 500, background: ordenClientes.key === o.key ? 'var(--blue-light)' : '#fff', color: ordenClientes.key === o.key ? 'var(--blue)' : 'var(--gray-700)' }}
+            style={{ fontWeight: ordenClientes.key === o.key ? 700 : 500, background: ordenClientes.key === o.key ? 'var(--blue-light)' : 'var(--surface)', color: ordenClientes.key === o.key ? 'var(--blue)' : 'var(--gray-700)' }}
             onClick={() => toggleOrdenClientes(o.key)}
           >
             {o.label}<OrdenLabel active={ordenClientes.key === o.key} campo={o.key} dir={ordenClientes.dir} />
@@ -399,7 +481,7 @@ export default function Facturas() {
           <button
             key={c.key}
             className="btn btn-sm"
-            style={{ fontWeight: ordenFacturas.key === c.key ? 700 : 500, background: ordenFacturas.key === c.key ? 'var(--blue-light)' : '#fff', color: ordenFacturas.key === c.key ? 'var(--blue)' : 'var(--gray-700)' }}
+            style={{ fontWeight: ordenFacturas.key === c.key ? 700 : 500, background: ordenFacturas.key === c.key ? 'var(--blue-light)' : 'var(--surface)', color: ordenFacturas.key === c.key ? 'var(--blue)' : 'var(--gray-700)' }}
             onClick={() => toggleOrdenFacturas(c.key)}
           >
             {c.label}<OrdenLabel active={ordenFacturas.key === c.key} campo={c.key} dir={ordenFacturas.dir} />
@@ -408,7 +490,18 @@ export default function Facturas() {
       </div>
 
       {grupos.length === 0 ? (
-        <div className="empty">No hay facturas que mostrar</div>
+        <div className="empty-rich">
+            <div className="empty-rich-icon"><Receipt size={26} /></div>
+            <div className="empty-rich-title">{filtro || filtroEstado ? 'Sin resultados' : 'Aún no tienes facturas'}</div>
+            <div className="empty-rich-text">
+              {filtro || filtroEstado
+                ? 'Prueba cambiando la búsqueda o el filtro de estado.'
+                : 'Crea tu primera factura para empezar a llevar el control de tus cobros.'}
+            </div>
+            {filtro || filtroEstado
+              ? <button className="btn" onClick={() => { setFiltro(''); setFiltroEstado('') }}>Limpiar filtros</button>
+              : <button className="btn btn-primary" onClick={openNueva}><Plus size={15} /> Crear factura</button>}
+          </div>
       ) : (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {grupos.map(g => {
@@ -416,7 +509,14 @@ export default function Facturas() {
             const pctCumplimiento = g.total > 0 ? Math.min(100, Math.round(g.pagado / g.total * 100)) : 100
             const alDia = g.pendiente <= 0
             return (
-              <div key={g.cliente_id} className="card" style={{ marginBottom: 0 }}>
+              <div
+                key={g.cliente_id}
+                id={`cliente-grupo-${g.cliente_id}`}
+                className="card"
+                style={clienteResaltado === g.cliente_id
+                  ? { marginBottom: 0, boxShadow: '0 0 0 2px var(--brand)', transition: 'box-shadow 1.8s ease' }
+                  : { marginBottom: 0 }}
+              >
                 <div
                   onClick={() => toggleCliente(g.cliente_id)}
                   style={{ padding: '11px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}
@@ -476,13 +576,13 @@ export default function Facturas() {
                           const conAbono = f.estado !== 'pagada' && Number(f.total_pagado) > 0
                           return (
                             <>
-                              <tr key={f.id} className="row-clickable" onClick={() => toggleFactura(f.id)}>
+                              <tr id={`factura-row-${f.id}`} key={f.id} className="row-clickable" onClick={() => toggleFactura(f.id)} style={facturaResaltada === f.id ? { background: "var(--brand-light)", transition: "background 1.8s ease" } : undefined}>
                                 <td style={{ width: 24 }}>{isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
                                 <td style={{ fontWeight: 700 }}>{f.numero}</td>
                                 <td style={{ color: 'var(--gray-500)', fontSize: 12 }}>{fmtDate(f.fecha_emision)}</td>
-                                <td style={{ color: f.estado === 'vencida' ? '#A32D2D' : 'var(--gray-500)', fontSize: 12 }}>{fmtDate(f.fecha_vencimiento)}</td>
+                                <td style={{ color: f.estado === 'vencida' ? 'var(--danger-label)' : 'var(--gray-500)', fontSize: 12 }}>{fmtDate(f.fecha_vencimiento)}</td>
                                 <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(f.monto)}</td>
-                                <td style={{ textAlign: 'right', color: '#1D9E75', fontWeight: 600 }}>{fmt(f.total_pagado)}</td>
+                                <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 600 }}>{fmt(f.total_pagado)}</td>
                                 <td style={{ minWidth: 90 }}>
                                   <div className="progress-bar" style={{ width: 80 }}><div className="progress-fill" style={{ width: pct + '%' }} /></div>
                                 </td>
@@ -496,8 +596,14 @@ export default function Facturas() {
                                   <div className="actions-row">
                                     <button className="btn btn-sm btn-icon" title="Editar factura" onClick={() => openEditar(f)}><Pencil size={13} /></button>
                                     <button className="btn btn-sm btn-icon" title="Descargar PDF" onClick={() => descargarPDF(f)}><FileDown size={13} /></button>
-                                    <button className="btn btn-sm btn-icon" title="Registrar pago" onClick={() => window.location.href = '/pagos?factura=' + f.id}><CreditCard size={13} /></button>
-                                    <button className="btn btn-sm btn-icon btn-danger" onClick={() => eliminar(f.id)}><Trash2 size={13} /></button>
+                                    {Number(f.total_pagado) > 0 && (
+                                      <button className="btn btn-sm btn-icon" title="Ver pagos de esta factura" onClick={() => verPagosDeFactura(f)}><FileText size={13} /></button>
+                                    )}
+                                    {f.estado === 'vencida' && tieneTelefono(f.cliente_id) && (
+                                      <button className="btn btn-sm btn-icon btn-whatsapp" title="Recordar pago por WhatsApp" onClick={() => recordarPorWhatsapp(f)}><MessageCircle size={13} /></button>
+                                    )}
+                                    <button className="btn btn-sm btn-icon" title="Registrar pago" onClick={() => navigate('/pagos?factura=' + f.id)}><CreditCard size={13} /></button>
+                                    <button className="btn btn-sm btn-icon btn-danger" title="Eliminar factura" onClick={() => eliminar(f)}><Trash2 size={13} /></button>
                                   </div>
                                 </td>
                               </tr>
@@ -544,7 +650,7 @@ export default function Facturas() {
           <button
             key={c.key}
             className="btn btn-sm"
-            style={{ fontWeight: ordenFacturas.key === c.key ? 700 : 500, background: ordenFacturas.key === c.key ? 'var(--blue-light)' : '#fff', color: ordenFacturas.key === c.key ? 'var(--blue)' : 'var(--gray-700)' }}
+            style={{ fontWeight: ordenFacturas.key === c.key ? 700 : 500, background: ordenFacturas.key === c.key ? 'var(--blue-light)' : 'var(--surface)', color: ordenFacturas.key === c.key ? 'var(--blue)' : 'var(--gray-700)' }}
             onClick={() => toggleOrdenFacturas(c.key)}
           >
             {c.label}<OrdenLabel active={ordenFacturas.key === c.key} campo={c.key} dir={ordenFacturas.dir} />
@@ -571,7 +677,18 @@ export default function Facturas() {
             </thead>
             <tbody>
               {listaPlana.length === 0 ? (
-                <tr><td colSpan={10}><div className="empty">No hay facturas que mostrar</div></td></tr>
+                <tr><td colSpan={10}><div className="empty-rich">
+            <div className="empty-rich-icon"><Receipt size={26} /></div>
+            <div className="empty-rich-title">{filtro || filtroEstado ? 'Sin resultados' : 'Aún no tienes facturas'}</div>
+            <div className="empty-rich-text">
+              {filtro || filtroEstado
+                ? 'Prueba cambiando la búsqueda o el filtro de estado.'
+                : 'Crea tu primera factura para empezar a llevar el control de tus cobros.'}
+            </div>
+            {filtro || filtroEstado
+              ? <button className="btn" onClick={() => { setFiltro(''); setFiltroEstado('') }}>Limpiar filtros</button>
+              : <button className="btn btn-primary" onClick={openNueva}><Plus size={15} /> Crear factura</button>}
+          </div></td></tr>
               ) : listaPlana.map(f => {
                 const pct = f.monto > 0 ? Math.min(100, Math.round(Number(f.total_pagado) / Number(f.monto) * 100)) : 0
                 const isExpanded = expandidaFactura === f.id
@@ -579,14 +696,14 @@ export default function Facturas() {
                 const conAbono = f.estado !== 'pagada' && Number(f.total_pagado) > 0
                 return (
                   <>
-                    <tr key={f.id} className="row-clickable" onClick={() => toggleFactura(f.id)}>
+                    <tr id={`factura-row-${f.id}`} key={f.id} className="row-clickable" onClick={() => toggleFactura(f.id)} style={facturaResaltada === f.id ? { background: "var(--brand-light)", transition: "background 1.8s ease" } : undefined}>
                       <td style={{ width: 24 }}>{isExpanded ? <ChevronDown size={13} /> : <ChevronRight size={13} />}</td>
                       <td style={{ fontWeight: 700 }}>{f.numero}</td>
                       <td>{f.cliente_nombre}</td>
                       <td style={{ color: 'var(--gray-500)', fontSize: 12 }}>{fmtDate(f.fecha_emision)}</td>
-                      <td style={{ color: f.estado === 'vencida' ? '#A32D2D' : 'var(--gray-500)', fontSize: 12 }}>{fmtDate(f.fecha_vencimiento)}</td>
+                      <td style={{ color: f.estado === 'vencida' ? 'var(--danger-label)' : 'var(--gray-500)', fontSize: 12 }}>{fmtDate(f.fecha_vencimiento)}</td>
                       <td style={{ textAlign: 'right', fontWeight: 600 }}>{fmt(f.monto)}</td>
-                      <td style={{ textAlign: 'right', color: '#1D9E75', fontWeight: 600 }}>{fmt(f.total_pagado)}</td>
+                      <td style={{ textAlign: 'right', color: 'var(--green)', fontWeight: 600 }}>{fmt(f.total_pagado)}</td>
                       <td style={{ minWidth: 90 }}>
                         <div className="progress-bar" style={{ width: 80 }}><div className="progress-fill" style={{ width: pct + '%' }} /></div>
                       </td>
@@ -600,8 +717,14 @@ export default function Facturas() {
                         <div className="actions-row">
                           <button className="btn btn-sm btn-icon" title="Editar factura" onClick={() => openEditar(f)}><Pencil size={13} /></button>
                           <button className="btn btn-sm btn-icon" title="Descargar PDF" onClick={() => descargarPDF(f)}><FileDown size={13} /></button>
-                          <button className="btn btn-sm btn-icon" title="Registrar pago" onClick={() => window.location.href = '/pagos?factura=' + f.id}><CreditCard size={13} /></button>
-                          <button className="btn btn-sm btn-icon btn-danger" onClick={() => eliminar(f.id)}><Trash2 size={13} /></button>
+                          {Number(f.total_pagado) > 0 && (
+                            <button className="btn btn-sm btn-icon" title="Ver pagos de esta factura" onClick={() => verPagosDeFactura(f)}><FileText size={13} /></button>
+                          )}
+                          {f.estado === 'vencida' && tieneTelefono(f.cliente_id) && (
+                            <button className="btn btn-sm btn-icon btn-whatsapp" title="Recordar pago por WhatsApp" onClick={() => recordarPorWhatsapp(f)}><MessageCircle size={13} /></button>
+                          )}
+                          <button className="btn btn-sm btn-icon" title="Registrar pago" onClick={() => navigate('/pagos?factura=' + f.id)}><CreditCard size={13} /></button>
+                          <button className="btn btn-sm btn-icon btn-danger" title="Eliminar factura" onClick={() => eliminar(f)}><Trash2 size={13} /></button>
                         </div>
                       </td>
                     </tr>
@@ -655,7 +778,15 @@ export default function Facturas() {
                 <div className="form-group"><label>Número *</label><input value={form.numero} onChange={e => set('numero', e.target.value)} placeholder="FAC-001" /></div>
                 <div className="form-group"><label>Fecha emisión *</label><input type="date" value={form.fecha_emision} onChange={e => set('fecha_emision', e.target.value)} /></div>
               </div>
-              <div className="form-group"><label>Fecha vencimiento *</label><input type="date" value={form.fecha_vencimiento} onChange={e => set('fecha_vencimiento', e.target.value)} /></div>
+              <div className="form-group">
+                <label>Fecha vencimiento *</label>
+                <input type="date" value={form.fecha_vencimiento} onChange={e => set('fecha_vencimiento', e.target.value)} />
+                {form.fecha_emision && form.fecha_vencimiento === sumarUnMes(form.fecha_emision) && (
+                  <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>
+                    Sugerido: un mes después de la emisión. Puedes cambiarlo.
+                  </div>
+                )}
+              </div>
 
               <div style={{ borderTop: '1px solid var(--gray-200)', paddingTop: 14 }}>
                 <div style={{ fontWeight: 600, fontSize: 13, marginBottom: 10 }}>Productos de la factura</div>
@@ -701,7 +832,7 @@ export default function Facturas() {
                       value={montoManual ? montoValor : totalItems || ''}
                       onChange={e => { setMontoManual(true); setMontoValor(e.target.value) }}
                       placeholder="0"
-                      style={{ background: '#fff', fontWeight: 700, fontSize: 16, color: 'var(--green-dark)' }}
+                      style={{ background: 'var(--surface)', fontWeight: 700, fontSize: 16, color: 'var(--green-dark)' }}
                     />
                     {montoManual && (
                       <button type="button" className="btn btn-sm" onClick={() => { setMontoManual(false); setMontoValor('') }} title="Usar el total sugerido por los productos">

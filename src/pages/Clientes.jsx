@@ -1,10 +1,15 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { supabase } from '../lib/supabase'
 import { fmt, initials } from '../lib/utils'
 import { generarEstadoCuentaPDF } from '../lib/pdf'
-import { Plus, Pencil, Trash2, Phone, FileDown, Users, AlertTriangle, CheckCircle } from 'lucide-react'
+import { useUI } from '../hooks/useUI'
+import { usePersistedState } from '../hooks/usePersistedState'
+import { Plus, Pencil, Trash2, Phone, FileDown, Users, AlertTriangle, CheckCircle, ChevronRight } from 'lucide-react'
 
 export default function Clientes() {
+  const navigate = useNavigate()
+  const { toast, confirmar } = useUI()
   const [clientes, setClientes] = useState([])
   const [resumen, setResumen] = useState({})
   const [facturasCliente, setFacturasCliente] = useState([])
@@ -14,7 +19,9 @@ export default function Clientes() {
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ nombre: '', nit: '', email: '', telefono: '', direccion: '', notas: '' })
   const [buscar, setBuscar] = useState('')
-  const [orden, setOrden] = useState('deuda')
+  const [orden, setOrden] = usePersistedState('clientes-orden', 'deuda')
+
+  const verFacturas = (cliente) => navigate('/facturas?cliente=' + cliente.id)
 
   useEffect(() => { load() }, [])
 
@@ -42,22 +49,35 @@ export default function Clientes() {
   const estadoCuenta = (cliente) => {
     const facturas = facturasCliente.filter(f => f.cliente_id === cliente.id)
     generarEstadoCuentaPDF({ cliente, facturas })
+    toast(`Estado de cuenta de ${cliente.nombre} descargado`)
   }
 
   const openNuevo = () => { setEditId(null); setForm({ nombre: '', nit: '', email: '', telefono: '', direccion: '', notas: '' }); setModal('form') }
   const openEditar = (c) => { setEditId(c.id); setForm({ nombre: c.nombre, nit: c.nit || '', email: c.email || '', telefono: c.telefono || '', direccion: c.direccion || '', notas: c.notas || '' }); setModal('form') }
 
   const guardar = async () => {
-    if (!form.nombre.trim()) { alert('El nombre es obligatorio'); return }
+    if (!form.nombre.trim()) { toast('El nombre es obligatorio', { tipo: 'error' }); return }
     setSaving(true)
-    if (editId) await supabase.from('clientes').update({ ...form, updated_at: new Date().toISOString() }).eq('id', editId)
-    else await supabase.from('clientes').insert(form)
-    setSaving(false); setModal(null); load()
+    const esEdicion = !!editId
+    const { error } = esEdicion
+      ? await supabase.from('clientes').update({ ...form, updated_at: new Date().toISOString() }).eq('id', editId)
+      : await supabase.from('clientes').insert(form)
+    setSaving(false)
+    if (error) { toast('Error: ' + error.message, { tipo: 'error', duracion: 5000 }); return }
+    toast(esEdicion ? `Cliente "${form.nombre}" actualizado` : `Cliente "${form.nombre}" creado`)
+    setModal(null); load()
   }
 
-  const eliminar = async (id) => {
-    if (!confirm('¿Eliminar este cliente? Se eliminarán también todas sus facturas.')) return
-    await supabase.from('clientes').delete().eq('id', id)
+  const eliminar = async (cliente) => {
+    const ok = await confirmar({
+      titulo: 'Eliminar cliente',
+      mensaje: `Se eliminará "${cliente.nombre}" y todas sus facturas asociadas. Esta acción no se puede deshacer.`,
+      textoConfirmar: 'Eliminar',
+    })
+    if (!ok) return
+    const { error } = await supabase.from('clientes').delete().eq('id', cliente.id)
+    if (error) { toast('Error: ' + error.message, { tipo: 'error', duracion: 5000 }); return }
+    toast(`Cliente "${cliente.nombre}" eliminado`, { tipo: 'info' })
     load()
   }
 
@@ -123,16 +143,28 @@ export default function Clientes() {
             </thead>
             <tbody>
               {filtered.length === 0 ? (
-                <tr><td colSpan={7}><div className="empty">No hay clientes registrados</div></td></tr>
+                <tr><td colSpan={7}>
+                  <div className="empty-rich">
+                    <div className="empty-rich-icon"><Users size={26} /></div>
+                    <div className="empty-rich-title">{buscar ? 'Sin resultados' : 'Aún no tienes clientes'}</div>
+                    <div className="empty-rich-text">
+                      {buscar ? `No encontramos clientes que coincidan con "${buscar}".` : 'Crea tu primer cliente para empezar a registrar facturas.'}
+                    </div>
+                    {!buscar && <button className="btn btn-primary" onClick={openNuevo}><Plus size={15} /> Crear cliente</button>}
+                  </div>
+                </td></tr>
               ) : filtered.map(c => {
                 const r = resumen[c.id] || { cobrado: 0, pendiente: 0, abiertas: 0, cerradas: 0 }
                 return (
-                  <tr key={c.id}>
+                  <tr key={c.id} className="row-clickable" onClick={() => verFacturas(c)} title="Ver facturas de este cliente">
                     <td>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
                         <div className="avatar" style={{ width: 30, height: 30, fontSize: 11 }}>{initials(c.nombre)}</div>
                         <div>
-                          <div style={{ fontWeight: 600 }}>{c.nombre}</div>
+                          <div style={{ fontWeight: 600, display: 'flex', alignItems: 'center', gap: 4 }}>
+                            {c.nombre}
+                            <ChevronRight size={13} style={{ color: 'var(--gray-500)' }} />
+                          </div>
                           {c.nit && <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>NIT: {c.nit}</div>}
                         </div>
                       </div>
@@ -143,13 +175,13 @@ export default function Clientes() {
                     </td>
                     <td style={{ textAlign: 'center' }}><span className="badge badge-pendiente">{r.abiertas}</span></td>
                     <td style={{ textAlign: 'center' }}><span className="badge badge-pagada">{r.cerradas}</span></td>
-                    <td style={{ textAlign: 'right', color: '#1D9E75', fontWeight: 600 }}>{fmt(r.cobrado)}</td>
-                    <td style={{ textAlign: 'right', color: r.pendiente > 0 ? '#854F0B' : 'var(--gray-500)', fontWeight: 600 }}>{r.pendiente > 0 ? fmt(r.pendiente) : '—'}</td>
-                    <td>
+                    <td style={{ textAlign: 'right', color: 'var(--green-dark)', fontWeight: 600 }}>{fmt(r.cobrado)}</td>
+                    <td style={{ textAlign: 'right', color: r.pendiente > 0 ? 'var(--warn-ink)' : 'var(--gray-500)', fontWeight: 600 }}>{r.pendiente > 0 ? fmt(r.pendiente) : '—'}</td>
+                    <td onClick={e => e.stopPropagation()}>
                       <div className="actions-row">
                         <button className="btn btn-sm btn-icon" title="Estado de cuenta PDF" onClick={() => estadoCuenta(c)}><FileDown size={13} /></button>
-                        <button className="btn btn-sm btn-icon" onClick={() => openEditar(c)}><Pencil size={13} /></button>
-                        <button className="btn btn-sm btn-icon btn-danger" onClick={() => eliminar(c.id)}><Trash2 size={13} /></button>
+                        <button className="btn btn-sm btn-icon" title="Editar cliente" onClick={() => openEditar(c)}><Pencil size={13} /></button>
+                        <button className="btn btn-sm btn-icon btn-danger" title="Eliminar cliente" onClick={() => eliminar(c)}><Trash2 size={13} /></button>
                       </div>
                     </td>
                   </tr>
@@ -161,25 +193,37 @@ export default function Clientes() {
       </div>
 
       <div className="show-mobile-block client-grid">
-        {filtered.length === 0 && <div className="empty">No hay clientes registrados</div>}
+        {filtered.length === 0 && (
+          <div className="empty-rich">
+            <div className="empty-rich-icon"><Users size={26} /></div>
+            <div className="empty-rich-title">{buscar ? 'Sin resultados' : 'Aún no tienes clientes'}</div>
+            <div className="empty-rich-text">
+              {buscar ? `No encontramos clientes que coincidan con "${buscar}".` : 'Crea tu primer cliente para empezar a registrar facturas.'}
+            </div>
+            {!buscar && <button className="btn btn-primary" onClick={openNuevo}><Plus size={15} /> Crear cliente</button>}
+          </div>
+        )}
         {filtered.map(c => {
           const r = resumen[c.id] || { cobrado: 0, pendiente: 0, abiertas: 0, cerradas: 0 }
           return (
             <div key={c.id} className="client-card" style={{ flexDirection: 'column', alignItems: 'stretch' }}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
                 <div className="avatar avatar-lg">{initials(c.nombre)}</div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontWeight: 700, fontSize: 14 }}>{c.nombre}</div>
+                <div style={{ flex: 1, minWidth: 0, cursor: 'pointer' }} onClick={() => verFacturas(c)}>
+                  <div style={{ fontWeight: 700, fontSize: 14, display: 'flex', alignItems: 'center', gap: 4 }}>
+                    {c.nombre}
+                    <ChevronRight size={14} style={{ color: 'var(--gray-500)' }} />
+                  </div>
                   {c.telefono && <div style={{ fontSize: 12, color: 'var(--gray-500)', display: 'flex', alignItems: 'center', gap: 4 }}><Phone size={11} />{c.telefono}</div>}
                   <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
                     <span className="badge badge-pendiente">{r.abiertas} abiertas</span>
                     <span className="badge badge-pagada">{r.cerradas} cerradas</span>
                   </div>
-                  {r.pendiente > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: '#854F0B', marginTop: 6 }}>{fmt(r.pendiente)} pendiente</div>}
+                  {r.pendiente > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--warn-ink)', marginTop: 6 }}>{fmt(r.pendiente)} pendiente</div>}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
-                  <button className="btn btn-sm btn-icon" onClick={() => openEditar(c)}><Pencil size={13} /></button>
-                  <button className="btn btn-sm btn-icon btn-danger" onClick={() => eliminar(c.id)}><Trash2 size={13} /></button>
+                  <button className="btn btn-sm btn-icon" title="Editar" onClick={() => openEditar(c)}><Pencil size={13} /></button>
+                  <button className="btn btn-sm btn-icon btn-danger" title="Eliminar" onClick={() => eliminar(c)}><Trash2 size={13} /></button>
                 </div>
               </div>
               <button className="btn btn-sm" style={{ marginTop: 10, width: '100%', justifyContent: 'center' }} onClick={() => estadoCuenta(c)}>
