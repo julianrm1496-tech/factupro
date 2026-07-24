@@ -5,7 +5,7 @@ import { fmt, fmtDate, nextFacturaNumber, today, sumarUnMes, linkRecordatorioPag
 import { generarFacturaPDF } from '../lib/pdf'
 import { useUI } from '../hooks/useUI'
 import { usePersistedState } from '../hooks/usePersistedState'
-import { Plus, Trash2, CreditCard, ChevronDown, ChevronRight, FileDown, Pencil, UserPlus, Receipt, CheckCircle, Clock, AlertTriangle, MessageCircle, FileText } from 'lucide-react'
+import { Plus, Trash2, CreditCard, ChevronDown, ChevronRight, FileDown, Pencil, UserPlus, Receipt, CheckCircle, Clock, AlertTriangle, MessageCircle, FileText, SlidersHorizontal, X } from 'lucide-react'
 
 const COLS = [
   { key: 'numero', label: 'Factura' },
@@ -30,6 +30,8 @@ export default function Facturas() {
   const [facturaResaltada, setFacturaResaltada] = useState(null)
   const [clientesAbiertos, setClientesAbiertos] = useState({})
   const [clienteResaltado, setClienteResaltado] = useState(null)
+  const [accionesAbiertas, setAccionesAbiertas] = useState(null) // id de factura con acciones desplegadas (móvil)
+  const [filtrosAbiertos, setFiltrosAbiertos] = useState(false)
   const [form, setForm] = useState({})
   const [items, setItems] = useState([])
   const [montoManual, setMontoManual] = useState(false)
@@ -387,9 +389,82 @@ export default function Facturas() {
     <span style={{ fontSize: 10.5, fontWeight: 500, opacity: .85 }}> · {textoOrden(campo, dir)}</span>
   )
 
+  // Cuenta cuántas opciones de orden difieren del valor por defecto (para el indicador del botón)
+  const ordenPersonalizado = [
+    !(ordenClientes.key === 'pendiente' && ordenClientes.dir === 'desc'),
+    !(ordenFacturas.key === 'fecha_emision' && ordenFacturas.dir === 'desc'),
+  ].filter(Boolean).length
+
+  // Tarjeta compacta de factura para móvil: una fila, acciones al tocar
+  const TarjetaFactura = ({ f }) => {
+    const abierta = accionesAbiertas === f.id
+    const conAbono = f.estado !== 'pagada' && Number(f.total_pagado) > 0
+    const its = itemsMap[f.id] || []
+
+    const toggleAcciones = async () => {
+      if (abierta) { setAccionesAbiertas(null); return }
+      setAccionesAbiertas(f.id)
+      if (!itemsMap[f.id]) await loadItems(f.id)
+    }
+
+    return (
+      <div
+        id={`factura-row-${f.id}`}
+        className={`fc-compact${abierta ? ' abierta' : ''}${f.estado === 'vencida' ? ' vencida' : ''}`}
+        style={facturaResaltada === f.id ? { boxShadow: '0 0 0 2px var(--brand)', transition: 'box-shadow 1.8s ease' } : undefined}
+      >
+        <div className="fc-fila" onClick={toggleAcciones}>
+          <div className="fc-info">
+            <div className="fc-titulo">
+              <span className="fc-numero">{f.numero}</span>
+              <span className={`badge badge-${f.estado}`}>
+                {f.estado === 'vencida' ? `vencida ${diasVencida(f.fecha_vencimiento)}d` : f.estado}
+              </span>
+              {conAbono && <span className="badge badge-blue">abono</span>}
+            </div>
+            <div className="fc-sub">
+              {f.estado === 'vencida' ? 'Venció' : 'Vence'} {fmtDate(f.fecha_vencimiento)}
+              {conAbono && ` · pagado ${fmt(f.total_pagado)}`}
+            </div>
+          </div>
+          <span className="fc-monto">{fmt(f.saldo_pendiente > 0 ? f.saldo_pendiente : f.monto)}</span>
+          <button className="fc-toggle" onClick={e => { e.stopPropagation(); toggleAcciones() }} aria-label="Acciones">
+            {abierta ? <ChevronDown size={17} /> : <ChevronRight size={17} />}
+          </button>
+        </div>
+
+        {abierta && (
+          <>
+            {its.length > 0 && (
+              <div className="fc-detalle">
+                {its.map(i => (
+                  <div key={i.id} style={{ display: 'flex', justifyContent: 'space-between', gap: 8, padding: '2px 0' }}>
+                    <span style={{ color: 'var(--gray-700)' }}>{i.descripcion} × {Number(i.cantidad)}</span>
+                    <span style={{ fontWeight: 600, whiteSpace: 'nowrap' }}>{fmt(Number(i.cantidad) * Number(i.precio_unitario))}</span>
+                  </div>
+                ))}
+              </div>
+            )}
+            <div className="fc-acciones">
+              <button className="fc-accion-principal" onClick={() => navigate('/pagos?factura=' + f.id)}>
+                <CreditCard size={16} /> Cobrar
+              </button>
+              <button className="fc-accion" onClick={() => descargarPDF(f)} aria-label="Descargar PDF"><FileDown size={16} /></button>
+              {f.estado === 'vencida' && tieneTelefono(f.cliente_id) && (
+                <button className="fc-accion whatsapp" onClick={() => recordarPorWhatsapp(f)} aria-label="Recordar por WhatsApp"><MessageCircle size={16} /></button>
+              )}
+              <button className="fc-accion" onClick={() => openEditar(f)} aria-label="Editar"><Pencil size={16} /></button>
+              <button className="fc-accion peligro" onClick={() => eliminar(f)} aria-label="Eliminar"><Trash2 size={16} /></button>
+            </div>
+          </>
+        )}
+      </div>
+    )
+  }
+
   return (
     <div>
-      <div className="metrics stagger-in">
+      <div className="metrics stagger-in carrusel">
         <div className="metric metric-brand"><div className="metric-label"><Receipt size={15} /> Total</div><div className="metric-value">{fmt(total)}</div></div>
         <div className="metric metric-success"><div className="metric-label"><CheckCircle size={15} /> Cobrado</div><div className="metric-value" style={{ color: 'var(--green-dark)' }}>{fmt(cobrado)}</div></div>
         <div
@@ -414,18 +489,40 @@ export default function Facturas() {
         </div>
       </div>
 
-      <div style={{ display: 'flex', gap: 8, marginBottom: 8, flexWrap: 'wrap' }}>
-        <input placeholder="Buscar cliente o factura..." value={filtro} onChange={e => setFiltro(e.target.value)} style={{ flex: 1, minWidth: 0, height: 38 }} />
-        <select value={filtroEstado} onChange={e => setFiltroEstado(e.target.value)} style={{ width: 'auto', height: 38 }}>
-          <option value="">Todos los estados</option>
-          <option value="porCobrar">Por cobrar</option>
-          <option value="pagada">Pagadas</option>
-          <option value="pendiente">Pendientes</option>
-          <option value="vencida">Vencidas</option>
-          <option value="abono">Con abono parcial</option>
-        </select>
-        <button className="btn btn-primary" onClick={openNueva} style={{ height: 38 }}>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 10, flexWrap: 'wrap' }}>
+        <input placeholder="Filtrar facturas..." value={filtro} onChange={e => setFiltro(e.target.value)} style={{ flex: 1, minWidth: 0, height: 40 }} />
+        <button className="btn btn-primary" onClick={openNueva} style={{ height: 40 }}>
           <Plus size={15} /> Nueva
+        </button>
+      </div>
+
+      {/* Vistas rápidas por estado */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+        <div className="vista-tabs">
+          {[
+            { key: '', label: 'Todas' },
+            { key: 'porCobrar', label: 'Por cobrar' },
+            { key: 'vencida', label: 'Vencidas' },
+            { key: 'pagada', label: 'Pagadas' },
+            { key: 'abono', label: 'Con abono' },
+          ].map(t => (
+            <button
+              key={t.key}
+              className={`vista-tab${filtroEstado === t.key ? ' activa' : ''}`}
+              onClick={() => setFiltroEstado(t.key)}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+        <button
+          className="btn btn-icon filtros-btn"
+          onClick={() => setFiltrosAbiertos(true)}
+          title="Opciones de orden"
+          aria-label="Opciones de orden"
+        >
+          <SlidersHorizontal size={17} />
+          {ordenPersonalizado > 0 && <span className="filtros-contador">{ordenPersonalizado}</span>}
         </button>
       </div>
 
@@ -456,39 +553,6 @@ export default function Facturas() {
 
       {vista === 'agrupado' && (
       <>
-      <div style={{ display: 'flex', gap: 4, marginBottom: 12, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span style={{ fontSize: 11.5, color: 'var(--gray-500)', marginRight: 2 }}>Ordenar clientes por:</span>
-        {[
-          { key: 'nombre', label: 'Nombre' },
-          { key: 'pendiente', label: 'Saldo pendiente' },
-          { key: 'total', label: 'Total facturado' },
-        ].map(o => (
-          <button
-            key={o.key}
-            className="btn btn-sm"
-            style={{ fontWeight: ordenClientes.key === o.key ? 700 : 500, background: ordenClientes.key === o.key ? 'var(--blue-light)' : 'var(--surface)', color: ordenClientes.key === o.key ? 'var(--blue)' : 'var(--gray-700)' }}
-            onClick={() => toggleOrdenClientes(o.key)}
-          >
-            {o.label}<OrdenLabel active={ordenClientes.key === o.key} campo={o.key} dir={ordenClientes.dir} />
-          </button>
-        ))}
-      </div>
-
-      {/* Ordenar facturas dentro de cada cliente */}
-      <div style={{ display: 'flex', gap: 4, marginBottom: 14, flexWrap: 'wrap', alignItems: 'center' }}>
-        <span style={{ fontSize: 11.5, color: 'var(--gray-500)', marginRight: 2 }}>Ordenar facturas por:</span>
-        {COLS.map(c => (
-          <button
-            key={c.key}
-            className="btn btn-sm"
-            style={{ fontWeight: ordenFacturas.key === c.key ? 700 : 500, background: ordenFacturas.key === c.key ? 'var(--blue-light)' : 'var(--surface)', color: ordenFacturas.key === c.key ? 'var(--blue)' : 'var(--gray-700)' }}
-            onClick={() => toggleOrdenFacturas(c.key)}
-          >
-            {c.label}<OrdenLabel active={ordenFacturas.key === c.key} campo={c.key} dir={ordenFacturas.dir} />
-          </button>
-        ))}
-      </div>
-
       {grupos.length === 0 ? (
         <div className="empty-rich">
             <div className="empty-rich-icon"><Receipt size={26} /></div>
@@ -518,6 +582,7 @@ export default function Facturas() {
                   : { marginBottom: 0 }}
               >
                 <div
+                  className={abierto ? 'cliente-header-sticky' : ''}
                   onClick={() => toggleCliente(g.cliente_id)}
                   style={{ padding: '11px 16px', cursor: 'pointer', display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: 8 }}
                 >
@@ -553,7 +618,13 @@ export default function Facturas() {
                 )}
 
                 {abierto && (
-                  <div className="table-wrapper" style={{ borderTop: '1px solid var(--gray-200)' }}>
+                  <>
+                    <div className="show-mobile-block" style={{ padding: '10px 12px', borderTop: '1px solid var(--border-soft)' }}>
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+                        {g.facturas.map(f => <TarjetaFactura key={f.id} f={f} />)}
+                      </div>
+                    </div>
+                    <div className="table-wrapper hide-mobile-block" style={{ borderTop: '1px solid var(--gray-200)' }}>
                     <table className="table-compact">
                       <thead>
                         <tr>
@@ -631,7 +702,8 @@ export default function Facturas() {
                         })}
                       </tbody>
                     </table>
-                  </div>
+                    </div>
+                  </>
                 )}
               </div>
             )
@@ -658,7 +730,24 @@ export default function Facturas() {
         ))}
       </div>
 
-      <div className="card">
+      <div className="show-mobile-block lista-tarjetas" style={{ marginBottom: 16 }}>
+        {listaPlana.length === 0 ? (
+          <div className="empty-rich">
+            <div className="empty-rich-icon"><Receipt size={26} /></div>
+            <div className="empty-rich-title">{filtro || filtroEstado ? 'Sin resultados' : 'Aún no tienes facturas'}</div>
+            <div className="empty-rich-text">
+              {filtro || filtroEstado ? 'Prueba cambiando la búsqueda o el filtro.' : 'Crea tu primera factura.'}
+            </div>
+          </div>
+        ) : listaPlana.map(f => (
+          <div key={f.id}>
+            <div style={{ fontSize: 11.5, color: 'var(--gray-500)', marginBottom: 3, paddingLeft: 2 }}>{f.cliente_nombre}</div>
+            <TarjetaFactura f={f} />
+          </div>
+        ))}
+      </div>
+
+      <div className="card hide-mobile-block">
         <div className="table-wrapper">
           <table className="table-compact">
             <thead>
@@ -759,10 +848,10 @@ export default function Facturas() {
 
       {modal === 'nueva' && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(null)}>
-          <div className="modal">
+          <div className="modal modal-fullscreen">
             <div className="modal-header">
               <span className="modal-title">{editId ? 'Editar factura' : 'Nueva factura'}</span>
-              <button className="btn btn-icon btn-sm" onClick={() => { setModal(null); setEditId(null) }}>✕</button>
+              <button className="btn btn-icon btn-sm" onClick={() => { setModal(null); setEditId(null) }} aria-label="Cerrar"><X size={16} /></button>
             </div>
             <div className="modal-body">
               <div className="form-group">
@@ -887,9 +976,68 @@ export default function Facturas() {
         </div>
       )}
 
-      <button className="fab" onClick={openNueva} title="Nueva factura" aria-label="Nueva factura">
-        <Plus size={24} />
-      </button>
+      {filtrosAbiertos && (
+        <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setFiltrosAbiertos(false)}>
+          <div className="modal" style={{ maxWidth: 440 }}>
+            <div className="modal-header">
+              <span className="modal-title">Opciones de orden</span>
+              <button className="btn btn-icon btn-sm" onClick={() => setFiltrosAbiertos(false)}><X size={16} /></button>
+            </div>
+            <div className="modal-body">
+              {vista === 'agrupado' && (
+                <div className="form-group">
+                  <label>Ordenar clientes por</label>
+                  <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                    {[
+                      { key: 'nombre', label: 'Nombre' },
+                      { key: 'pendiente', label: 'Saldo pendiente' },
+                      { key: 'total', label: 'Total facturado' },
+                    ].map(o => (
+                      <button
+                        key={o.key}
+                        className={`vista-tab${ordenClientes.key === o.key ? ' activa' : ''}`}
+                        onClick={() => toggleOrdenClientes(o.key)}
+                      >
+                        {o.label}<OrdenLabel active={ordenClientes.key === o.key} campo={o.key} dir={ordenClientes.dir} />
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <div className="form-group">
+                <label>Ordenar facturas por</label>
+                <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
+                  {COLS.map(c => (
+                    <button
+                      key={c.key}
+                      className={`vista-tab${ordenFacturas.key === c.key ? ' activa' : ''}`}
+                      onClick={() => toggleOrdenFacturas(c.key)}
+                    >
+                      {c.label}<OrdenLabel active={ordenFacturas.key === c.key} campo={c.key} dir={ordenFacturas.dir} />
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize: 11.5, color: 'var(--gray-500)', marginTop: 4 }}>
+                  Toca de nuevo la misma opción para invertir el orden.
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button
+                className="btn"
+                onClick={() => {
+                  setOrdenClientes({ key: 'pendiente', dir: 'desc' })
+                  setOrdenFacturas({ key: 'fecha_emision', dir: 'desc' })
+                }}
+              >
+                Restablecer
+              </button>
+              <button className="btn btn-primary" onClick={() => setFiltrosAbiertos(false)}>Listo</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

@@ -649,3 +649,186 @@ tbody tr.row-clickable:hover td:first-child { box-shadow: inset 3px 0 0 var(--br
 
 /* La métrica de "Total facturado" mantiene su gradiente verde con texto blanco */
 [data-tema="oscuro"] .metric-gradient { border-color: transparent; }
+
+/* ═══════════════ EXPERIENCIA MÓVIL ═══════════════ */
+
+/* ─── Barra de navegación inferior (solo móvil) ─── */
+.bottom-nav { display: none; }
+
+@media (max-width: 768px) {
+  .bottom-nav {
+    display: flex; position: fixed; bottom: 0; left: 0; right: 0; z-index: 90;
+    background: var(--surface); border-top: 1px solid var(--border);
+    padding: 6px 2px calc(8px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -2px 12px rgba(15,23,42,.06);
+  }
+  [data-tema="oscuro"] .bottom-nav { box-shadow: 0 -2px 12px rgba(0,0,0,.4); }
+
+  .bottom-nav-item {
+    flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
+    padding: 6px 2px; text-decoration: none; color: var(--gray-500);
+    position: relative; min-height: 48px; justify-content: center;
+    transition: color .15s ease;
+  }
+  .bottom-nav-item span { font-size: 11px; font-weight: 500; }
+  .bottom-nav-item.active { color: var(--brand); }
+  .bottom-nav-item.active span { font-weight: 700; }
+  .bottom-nav-item:active { transform: scale(.94); }
+
+  .bottom-nav-badge {
+    position: absolute; top: 2px; left: 50%; margin-left: 6px;
+    background: var(--red); color: #fff; font-size: 10px; font-weight: 700;
+    min-width: 17px; height: 17px; border-radius: 9px; padding: 0 4px;
+    display: flex; align-items: center; justify-content: center;
+  }
+
+  /* Espacio para que la barra no tape el contenido */
+  .content { padding-bottom: 78px; }
+
+  /* El FAB se retira en móvil: la acción principal vive en la barra superior */
+  .fab { display: none !important; }
+}
+
+/* ─── Toques más grandes en móvil ─── */
+@media (max-width: 768px) {
+  .btn-icon { width: 40px; height: 40px; padding: 8px; }
+  .btn-sm.btn-icon { width: 40px; height: 40px; }
+  .btn { min-height: 40px; }
+  .btn-sm { min-height: 36px; padding: 7px 12px; font-size: 13px; }
+}
+
+/* ─── Tarjeta compacta de factura (una sola fila) ─── */
+.fc-compact {
+  background: var(--surface); border: 1px solid var(--border);
+  border-radius: var(--radius); overflow: hidden;
+  transition: border-color .18s ease, box-shadow .18s ease;
+}
+.fc-compact.abierta { border-color: var(--brand); box-shadow: 0 0 0 1px var(--brand-glow); }
+.fc-compact.vencida { background: var(--surface-danger); border-color: var(--surface-danger-border); }
+
+.fc-fila {
+  display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+  cursor: pointer; min-height: 58px;
+}
+.fc-fila:active { background: var(--gray-100); }
+.fc-info { flex: 1; min-width: 0; }
+.fc-titulo { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.fc-numero { font-size: 14.5px; font-weight: 700; color: var(--text); }
+.fc-sub { font-size: 12px; color: var(--gray-500); margin-top: 2px; }
+.fc-monto { font-size: 14.5px; font-weight: 700; color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.fc-toggle {
+  width: 38px; height: 38px; border-radius: var(--radius); flex-shrink: 0;
+  border: 1px solid var(--border); background: var(--surface);
+  display: flex; align-items: center; justify-content: center; color: var(--gray-500);
+  cursor: pointer; transition: all .15s ease;
+}
+.fc-toggle:active { transform: scale(.92); }
+.fc-compact.abierta .fc-toggle { background: var(--brand-light); border-color: var(--brand); color: var(--brand-dark); }
+
+.fc-acciones {
+  display: flex; gap: 6px; padding: 10px 12px; border-top: 1px solid var(--border-soft);
+  animation: fadeSlideUp .22s var(--ease-bounce);
+}
+.fc-accion-principal {
+  flex: 1; height: 42px; border-radius: var(--radius);
+  background: var(--brand-dark); color: #fff; border: none;
+  display: flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 13.5px; font-weight: 600; cursor: pointer; font-family: inherit;
+  transition: transform .15s ease;
+}
+.fc-accion-principal:active { transform: scale(.97); }
+.fc-accion {
+  width: 42px; height: 42px; border-radius: var(--radius); flex-shrink: 0;
+  border: 1px solid var(--border); background: var(--surface); color: var(--gray-700);
+  display: flex; align-items: center; justify-content: center; cursor: pointer;
+  transition: transform .15s ease;
+}
+.fc-accion:active { transform: scale(.92); }
+.fc-accion.peligro { color: var(--red); border-color: rgba(163,45,45,.3); }
+.fc-accion.whatsapp { color: #128C7E; border-color: #A7E3D8; }
+[data-tema="oscuro"] .fc-accion.whatsapp { color: #4ADE9E; border-color: #1F5C4D; }
+
+.fc-detalle {
+  padding: 10px 12px; border-top: 1px solid var(--border-soft);
+  background: var(--surface-alt); font-size: 12.5px;
+}
+
+/* ─── Métricas en carrusel horizontal (móvil) ─── */
+@media (max-width: 768px) {
+  .metrics.carrusel {
+    display: flex; gap: 10px; overflow-x: auto; scroll-snap-type: x mandatory;
+    padding-bottom: 4px; margin-left: -16px; margin-right: -16px;
+    padding-left: 16px; padding-right: 16px;
+    -webkit-overflow-scrolling: touch; scrollbar-width: none;
+  }
+  .metrics.carrusel::-webkit-scrollbar { display: none; }
+  .metrics.carrusel > * {
+    flex: 0 0 auto; width: 160px; scroll-snap-align: start;
+  }
+}
+
+/* ─── Pestañas de vista rápida ─── */
+.vista-tabs {
+  display: flex; gap: 6px; overflow-x: auto; padding-bottom: 2px;
+  scrollbar-width: none; -webkit-overflow-scrolling: touch;
+}
+.vista-tabs::-webkit-scrollbar { display: none; }
+.vista-tab {
+  flex-shrink: 0; padding: 8px 15px; border-radius: 20px; cursor: pointer;
+  border: 1px solid var(--border); background: var(--surface);
+  color: var(--gray-700); font-size: 13px; font-weight: 500; font-family: inherit;
+  white-space: nowrap; min-height: 38px; transition: all .16s ease;
+}
+.vista-tab:active { transform: scale(.96); }
+.vista-tab.activa {
+  background: var(--brand-light); border-color: var(--brand);
+  color: var(--brand-dark); font-weight: 700;
+}
+
+/* ─── Botón de filtros con contador ─── */
+.filtros-btn { position: relative; flex-shrink: 0; }
+.filtros-contador {
+  position: absolute; top: -5px; right: -5px;
+  background: var(--brand); color: #fff; font-size: 10px; font-weight: 700;
+  min-width: 17px; height: 17px; border-radius: 9px; padding: 0 4px;
+  display: flex; align-items: center; justify-content: center;
+}
+
+/* ─── Encabezado de cliente pegajoso ─── */
+.cliente-header-sticky {
+  position: sticky; top: 0; z-index: 5;
+  background: var(--surface); backdrop-filter: blur(6px);
+}
+
+/* ─── Modal a pantalla completa en móvil ─── */
+@media (max-width: 768px) {
+  .modal-fullscreen {
+    max-height: 100vh; height: 100vh; border-radius: 0;
+    display: flex; flex-direction: column;
+  }
+  .modal-fullscreen .modal-body { flex: 1; overflow-y: auto; }
+  .modal-fullscreen .modal-footer {
+    padding-bottom: calc(12px + env(safe-area-inset-bottom, 0px));
+    box-shadow: 0 -2px 12px rgba(15,23,42,.08);
+  }
+  .modal-fullscreen .modal-footer .btn { flex: 1; justify-content: center; min-height: 46px; }
+}
+
+/* ─── Tipografía un punto más grande en móvil ─── */
+@media (max-width: 768px) {
+  .badge { font-size: 11.5px; padding: 3px 9px; }
+  .metric-label { font-size: 11.5px; }
+  .metric-value { font-size: 17px; }
+  td { font-size: 13px; }
+  .table-compact td { font-size: 13px; }
+}
+
+/* Columnas de métricas por página (sin estilos inline, para no romper el carrusel móvil) */
+@media (min-width: 769px) {
+  .metrics.metrics-2 { grid-template-columns: repeat(2, 1fr); }
+  .metrics.metrics-3 { grid-template-columns: repeat(3, 1fr); }
+}
+
+/* Lista de tarjetas en móvil (sin display inline, para respetar el media query) */
+.lista-tarjetas { flex-direction: column; gap: 8px; }
+@media (max-width: 768px) { .show-mobile-block.lista-tarjetas { display: flex; } }

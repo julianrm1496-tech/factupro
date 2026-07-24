@@ -173,7 +173,7 @@ export default function Pagos() {
 
   return (
     <div>
-      <div className="metrics stagger-in" style={{ gridTemplateColumns: 'repeat(2, 1fr)' }}>
+      <div className="metrics stagger-in carrusel metrics-2">
         <div className="metric metric-success"><div className="metric-label"><CheckCircle size={15} /> Total cobrado</div><div className="metric-value" style={{ color: 'var(--green-dark)' }}>{fmt(totalGeneral)}</div></div>
         <div className="metric metric-brand"><div className="metric-label"><Calendar size={15} /> Este mes</div><div className="metric-value">{fmt(totalMes)}</div></div>
       </div>
@@ -301,11 +301,6 @@ export default function Pagos() {
         </div>
       )}
 
-      {facturas.length > 0 && (
-        <button className="fab" onClick={openNuevo} title="Registrar pago" aria-label="Registrar pago">
-          <Plus size={24} />
-        </button>
-      )}
     </div>
   )
 }

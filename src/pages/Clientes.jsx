@@ -111,7 +111,7 @@ export default function Clientes() {
 
   return (
     <div>
-      <div className="metrics stagger-in" style={{ gridTemplateColumns: 'repeat(3, 1fr)' }}>
+      <div className="metrics stagger-in carrusel metrics-3">
         <div className="metric metric-brand"><div className="metric-label"><Users size={15} /> Total clientes</div><div className="metric-value">{clientes.length}</div></div>
         <div className="metric metric-warn"><div className="metric-label"><AlertTriangle size={15} /> Con deuda</div><div className="metric-value">{totalClientesConDeuda}</div></div>
         <div className="metric metric-success"><div className="metric-label"><CheckCircle size={15} /> Al día</div><div className="metric-value" style={{ color: 'var(--green-dark)' }}>{clientes.length - totalClientesConDeuda}</div></div>
@@ -259,9 +259,6 @@ export default function Clientes() {
         </div>
       )}
 
-      <button className="fab" onClick={openNuevo} title="Nuevo cliente" aria-label="Nuevo cliente">
-        <Plus size={24} />
-      </button>
     </div>
   )
 }

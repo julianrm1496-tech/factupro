@@ -184,6 +184,22 @@ export default function Layout() {
         </main>
       </div>
 
+      {/* Navegación inferior — solo móvil */}
+      <nav className="bottom-nav">
+        {nav.map(({ to, label, Icon }) => (
+          <NavLink
+            key={to} to={to}
+            className={({ isActive }) => `bottom-nav-item${isActive ? ' active' : ''}`}
+          >
+            <Icon size={21} />
+            <span>{label}</span>
+            {to === '/facturas' && vencidasCount > 0 && (
+              <span className="bottom-nav-badge">{vencidasCount}</span>
+            )}
+          </NavLink>
+        ))}
+      </nav>
+
       {buscarAbierto && (
         <div className="gsearch-overlay" onClick={e => e.target === e.currentTarget && setBuscarAbierto(false)}>
           <div className="gsearch-box">

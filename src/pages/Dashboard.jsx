@@ -107,7 +107,7 @@ export default function Dashboard() {
 
   return (
     <div>
-      <div className="metrics stagger-in">
+      <div className="metrics stagger-in carrusel">
         <div className="metric metric-gradient" style={{ '--grad-from': '#1D9E75', '--grad-to': '#0F6E56' }}>
           <div className="metric-label" style={{ color: 'rgba(255,255,255,.85)' }}><Receipt size={15} /> Total facturado</div>
           <div className="metric-value" style={{ color: '#fff' }}>{fmt(totalFacturado)}</div>
