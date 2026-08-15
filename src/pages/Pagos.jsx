@@ -5,7 +5,7 @@ import { fmt, fmtDate, today } from '../lib/utils'
 import { generarFacturaPDF } from '../lib/pdf'
 import { useUI } from '../hooks/useUI'
 import { usePersistedState } from '../hooks/usePersistedState'
-import { Plus, Trash2, CheckCircle, Calendar, CreditCard } from 'lucide-react'
+import { Plus, Trash2, CheckCircle, Calendar, CreditCard, Pencil, X } from 'lucide-react'
 
 const METODOS_PAGO = [
   'Transferencia bancaria',
@@ -29,6 +29,8 @@ export default function Pagos() {
   const [modal, setModal] = useState(null)
   const [saving, setSaving] = useState(false)
   const [form, setForm] = useState({ factura_id: '', monto: '', fecha: today(), metodo: 'Transferencia bancaria', referencia: '' })
+  const [editId, setEditId] = useState(null)
+  const [facturaEnEdicionExtra, setFacturaEnEdicionExtra] = useState(null) // si la factura del pago editado ya esta "pagada" y no aparece en la lista normal
   const [ordenPagos, setOrdenPagos] = usePersistedState('pagos-orden', { key: 'fecha', dir: 'desc' })
 
   useEffect(() => { load() }, [])
@@ -37,6 +39,8 @@ export default function Pagos() {
     const params = new URLSearchParams(location.search)
     const facId = params.get('factura')
     if (facId && facturas.length > 0) {
+      setEditId(null)
+      setFacturaEnEdicionExtra(null)
       setForm(f => ({ ...f, factura_id: facId }))
       setModal('nuevo')
     }
@@ -57,23 +61,57 @@ export default function Pagos() {
   }
 
   const openNuevo = () => {
+    setEditId(null)
+    setFacturaEnEdicionExtra(null)
     setForm({ factura_id: facturas[0]?.id || '', monto: '', fecha: today(), metodo: 'Transferencia bancaria', referencia: '' })
     setModal('nuevo')
   }
 
+  const openEditar = async (pago) => {
+    setEditId(pago.id)
+    setForm({
+      factura_id: pago.factura_id,
+      monto: String(pago.monto),
+      fecha: pago.fecha,
+      metodo: pago.metodo || 'Transferencia bancaria',
+      referencia: pago.referencia || '',
+    })
+    // Si la factura de este pago ya no esta en la lista de pendientes (quedo pagada), la traemos aparte
+    if (!facturas.some(f => f.id === pago.factura_id)) {
+      const { data: f } = await supabase
+        .from('facturas_resumen')
+        .select('id, numero, cliente_nombre, monto, saldo_pendiente, estado')
+        .eq('id', pago.factura_id)
+        .single()
+      setFacturaEnEdicionExtra(f || null)
+    } else {
+      setFacturaEnEdicionExtra(null)
+    }
+    setModal('nuevo')
+  }
+
+  // Lista de facturas que se muestran en el selector (las pendientes + la del pago que se esta editando, si ya no esta pendiente)
+  const facturasSelect = facturaEnEdicionExtra ? [...facturas, facturaEnEdicionExtra] : facturas
+
   const guardar = async () => {
     if (!form.factura_id || !form.monto || !form.fecha) { toast('Completa los campos obligatorios', { tipo: 'error' }); return }
-    const factura = facturas.find(f => f.id === form.factura_id)
+    const factura = facturasSelect.find(f => f.id === form.factura_id)
     const monto = parseFloat(form.monto)
-    if (factura && monto > Number(factura.saldo_pendiente)) {
-      toast(`El monto supera el saldo pendiente de ${fmt(factura.saldo_pendiente)}`, { tipo: 'error', duracion: 5000 })
+
+    // Al editar, el monto anterior de este mismo pago libera saldo en su factura original
+    const pagoOriginal = editId ? pagos.find(p => p.id === editId) : null
+    const ajuste = (pagoOriginal && pagoOriginal.factura_id === form.factura_id) ? Number(pagoOriginal.monto) : 0
+    const disponible = factura ? Number(factura.saldo_pendiente) + ajuste : Infinity
+
+    if (factura && monto > disponible) {
+      toast(`El monto supera el saldo disponible de ${fmt(disponible)}`, { tipo: 'error', duracion: 5000 })
       return
     }
     setSaving(true)
-    const { error } = await supabase.from('pagos').insert({
-      factura_id: form.factura_id, monto, fecha: form.fecha,
-      metodo: form.metodo, referencia: form.referencia,
-    })
+    const payload = { factura_id: form.factura_id, monto, fecha: form.fecha, metodo: form.metodo, referencia: form.referencia }
+    const { error } = editId
+      ? await supabase.from('pagos').update(payload).eq('id', editId)
+      : await supabase.from('pagos').insert(payload)
     if (error) { setSaving(false); toast('Error: ' + error.message, { tipo: 'error', duracion: 5000 }); return }
 
     // Descarga automatica del PDF de la factura con el pago ya reflejado
@@ -94,7 +132,9 @@ export default function Pagos() {
 
     setSaving(false)
     setModal(null)
-    toast(`Pago de ${fmt(monto)} registrado · PDF descargado`)
+    toast(editId ? `Pago actualizado · PDF descargado` : `Pago de ${fmt(monto)} registrado · PDF descargado`)
+    setEditId(null)
+    setFacturaEnEdicionExtra(null)
     load()
   }
 
@@ -228,7 +268,12 @@ export default function Pagos() {
                   <td>{p.facturas?.clientes?.nombre}</td>
                   <td style={{ textAlign: 'right', fontWeight: 700, color: 'var(--green)' }}>{fmt(p.monto)}</td>
                   <td><span className="badge badge-blue">{p.metodo}</span></td>
-                  <td onClick={e => e.stopPropagation()}><button className="btn btn-sm btn-icon btn-danger" onClick={() => eliminar(p)}><Trash2 size={13} /></button></td>
+                  <td onClick={e => e.stopPropagation()}>
+                    <div className="actions-row">
+                      <button className="btn btn-sm btn-icon" title="Editar pago" onClick={() => openEditar(p)}><Pencil size={13} /></button>
+                      <button className="btn btn-sm btn-icon btn-danger" title="Eliminar pago" onClick={() => eliminar(p)}><Trash2 size={13} /></button>
+                    </div>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -252,7 +297,8 @@ export default function Pagos() {
               </div>
             </div>
             <div className="fcm-actions" onClick={e => e.stopPropagation()}>
-              <button className="btn btn-sm btn-icon btn-danger" onClick={() => eliminar(p)}><Trash2 size={13} /></button>
+              <button className="btn btn-sm btn-icon" title="Editar pago" onClick={() => openEditar(p)}><Pencil size={13} /></button>
+              <button className="btn btn-sm btn-icon btn-danger" title="Eliminar pago" onClick={() => eliminar(p)}><Trash2 size={13} /></button>
             </div>
           </div>
         ))}
@@ -261,23 +307,26 @@ export default function Pagos() {
 
       {modal === 'nuevo' && (
         <div className="modal-overlay" onClick={e => e.target === e.currentTarget && setModal(null)}>
-          <div className="modal">
+          <div className="modal modal-fullscreen">
             <div className="modal-header">
-              <span className="modal-title">Registrar pago / abono</span>
-              <button className="btn btn-icon btn-sm" onClick={() => setModal(null)}>✕</button>
+              <span className="modal-title">{editId ? 'Editar pago' : 'Registrar pago / abono'}</span>
+              <button className="btn btn-icon btn-sm" onClick={() => { setModal(null); setEditId(null); setFacturaEnEdicionExtra(null) }} aria-label="Cerrar"><X size={16} /></button>
             </div>
             <div className="modal-body">
               <div className="form-group">
                 <label>Factura *</label>
                 <select value={form.factura_id} onChange={e => set('factura_id', e.target.value)}>
-                  {facturas.map(f => <option key={f.id} value={f.id}>{f.numero} — {f.cliente_nombre} (saldo: {fmt(f.saldo_pendiente)})</option>)}
+                  {facturasSelect.map(f => <option key={f.id} value={f.id}>{f.numero} — {f.cliente_nombre} (saldo: {fmt(f.saldo_pendiente)})</option>)}
                 </select>
               </div>
               {form.factura_id && (() => {
-                const f = facturas.find(x => x.id === form.factura_id)
+                const f = facturasSelect.find(x => x.id === form.factura_id)
                 return f ? (
                   <div style={{ background: 'var(--surface-success)', border: '1px solid var(--surface-success-border)', borderRadius: 8, padding: '10px 14px', fontSize: 13 }}>
                     Saldo pendiente: <strong style={{ color: 'var(--green-dark)' }}>{fmt(f.saldo_pendiente)}</strong>
+                    {editId && f.id === (pagos.find(p => p.id === editId)?.factura_id) && (
+                      <div style={{ fontSize: 11.5, color: 'var(--gray-500)', marginTop: 2 }}>Incluye lo que libera este pago al editarlo.</div>
+                    )}
                   </div>
                 ) : null
               })()}
@@ -294,8 +343,10 @@ export default function Pagos() {
               <div className="form-group"><label>Referencia (opcional)</label><input value={form.referencia} onChange={e => set('referencia', e.target.value)} placeholder="TRF-123456" /></div>
             </div>
             <div className="modal-footer">
-              <button className="btn" onClick={() => setModal(null)}>Cancelar</button>
-              <button className="btn btn-primary" onClick={guardar} disabled={saving}>{saving ? 'Guardando...' : 'Registrar pago'}</button>
+              <button className="btn" onClick={() => { setModal(null); setEditId(null); setFacturaEnEdicionExtra(null) }}>Cancelar</button>
+              <button className="btn btn-primary" onClick={guardar} disabled={saving}>
+                {saving ? 'Guardando...' : editId ? 'Guardar cambios' : 'Registrar pago'}
+              </button>
             </div>
           </div>
         </div>

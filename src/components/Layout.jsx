@@ -6,13 +6,14 @@ import { supabase } from '../lib/supabase'
 import { initials, fmt } from '../lib/utils'
 import {
   LayoutDashboard, FileText, Users, CreditCard, LogOut, Menu, X,
-  Moon, Sun, Search
+  Moon, Sun, Search, Package
 } from 'lucide-react'
 
 const nav = [
   { to: '/dashboard', label: 'Dashboard', Icon: LayoutDashboard },
   { to: '/facturas', label: 'Facturas', Icon: FileText },
   { to: '/clientes', label: 'Clientes', Icon: Users },
+  { to: '/productos', label: 'Productos', Icon: Package },
   { to: '/pagos', label: 'Pagos', Icon: CreditCard },
 ]
 

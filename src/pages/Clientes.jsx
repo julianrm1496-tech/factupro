@@ -7,6 +7,9 @@ import { useUI } from '../hooks/useUI'
 import { usePersistedState } from '../hooks/usePersistedState'
 import { Plus, Pencil, Trash2, Phone, FileDown, Users, AlertTriangle, CheckCircle, ChevronRight } from 'lucide-react'
 
+const FORM_VACIO = { nombre: '', nit: '', email: '', telefono: '', direccion: '', notas: '', tipo_cliente: '' }
+const TIPO_LABEL = { distribuidor: 'Distribuidor', local: 'Local', nacional: 'Nacional', almacen: 'Almacén' }
+
 export default function Clientes() {
   const navigate = useNavigate()
   const { toast, confirmar } = useUI()
@@ -17,7 +20,7 @@ export default function Clientes() {
   const [modal, setModal] = useState(null)
   const [editId, setEditId] = useState(null)
   const [saving, setSaving] = useState(false)
-  const [form, setForm] = useState({ nombre: '', nit: '', email: '', telefono: '', direccion: '', notas: '' })
+  const [form, setForm] = useState(FORM_VACIO)
   const [buscar, setBuscar] = useState('')
   const [orden, setOrden] = usePersistedState('clientes-orden', 'deuda')
 
@@ -52,8 +55,8 @@ export default function Clientes() {
     toast(`Estado de cuenta de ${cliente.nombre} descargado`)
   }
 
-  const openNuevo = () => { setEditId(null); setForm({ nombre: '', nit: '', email: '', telefono: '', direccion: '', notas: '' }); setModal('form') }
-  const openEditar = (c) => { setEditId(c.id); setForm({ nombre: c.nombre, nit: c.nit || '', email: c.email || '', telefono: c.telefono || '', direccion: c.direccion || '', notas: c.notas || '' }); setModal('form') }
+  const openNuevo = () => { setEditId(null); setForm(FORM_VACIO); setModal('form') }
+  const openEditar = (c) => { setEditId(c.id); setForm({ nombre: c.nombre, nit: c.nit || '', email: c.email || '', telefono: c.telefono || '', direccion: c.direccion || '', notas: c.notas || '', tipo_cliente: c.tipo_cliente || '' }); setModal('form') }
 
   const guardar = async () => {
     if (!form.nombre.trim()) { toast('El nombre es obligatorio', { tipo: 'error' }); return }
@@ -166,6 +169,7 @@ export default function Clientes() {
                             <ChevronRight size={13} style={{ color: 'var(--gray-500)' }} />
                           </div>
                           {c.nit && <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>NIT: {c.nit}</div>}
+                          {c.tipo_cliente && <span className="badge badge-blue" style={{ marginTop: 3 }}>{TIPO_LABEL[c.tipo_cliente]}</span>}
                         </div>
                       </div>
                     </td>
@@ -215,9 +219,10 @@ export default function Clientes() {
                     <ChevronRight size={14} style={{ color: 'var(--gray-500)' }} />
                   </div>
                   {c.telefono && <div style={{ fontSize: 12, color: 'var(--gray-500)', display: 'flex', alignItems: 'center', gap: 4 }}><Phone size={11} />{c.telefono}</div>}
-                  <div style={{ display: 'flex', gap: 6, marginTop: 6 }}>
+                  <div style={{ display: 'flex', gap: 6, marginTop: 6, flexWrap: 'wrap' }}>
                     <span className="badge badge-pendiente">{r.abiertas} abiertas</span>
                     <span className="badge badge-pagada">{r.cerradas} cerradas</span>
+                    {c.tipo_cliente && <span className="badge badge-blue">{TIPO_LABEL[c.tipo_cliente]}</span>}
                   </div>
                   {r.pendiente > 0 && <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--warn-ink)', marginTop: 6 }}>{fmt(r.pendiente)} pendiente</div>}
                 </div>
@@ -249,6 +254,17 @@ export default function Clientes() {
               </div>
               <div className="form-group"><label>Correo electrónico</label><input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="cliente@correo.com" /></div>
               <div className="form-group"><label>Dirección</label><input value={form.direccion} onChange={e => set('direccion', e.target.value)} placeholder="Calle 123 #45-67" /></div>
+              <div className="form-group">
+                <label>Tipo de cliente</label>
+                <select value={form.tipo_cliente} onChange={e => set('tipo_cliente', e.target.value)}>
+                  <option value="">Sin definir</option>
+                  <option value="distribuidor">Distribuidor</option>
+                  <option value="local">Local</option>
+                  <option value="nacional">Nacional</option>
+                  <option value="almacen">Almacén</option>
+                </select>
+                <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>Define qué tarifa de precios se sugiere al facturarle.</div>
+              </div>
               <div className="form-group"><label>Notas</label><textarea value={form.notas} onChange={e => set('notas', e.target.value)} placeholder="Información adicional..." rows={2} /></div>
             </div>
             <div className="modal-footer">

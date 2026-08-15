@@ -34,6 +34,8 @@ export default function Facturas() {
   const [filtrosAbiertos, setFiltrosAbiertos] = useState(false)
   const [form, setForm] = useState({})
   const [items, setItems] = useState([])
+  const [productos, setProductos] = useState([])
+  const [sugerenciaAbierta, setSugerenciaAbierta] = useState(null) // id del item con el desplegable de catalogo abierto
   const [montoManual, setMontoManual] = useState(false)
   const [montoValor, setMontoValor] = useState('')
   const [editId, setEditId] = useState(null)
@@ -83,12 +85,14 @@ export default function Facturas() {
 
   const load = async () => {
     setLoading(true)
-    const [{ data: f }, { data: c }] = await Promise.all([
+    const [{ data: f }, { data: c }, { data: p }] = await Promise.all([
       supabase.from('facturas_resumen').select('*'),
       supabase.from('clientes').select('*').order('nombre'),
+      supabase.from('productos').select('*').eq('activo', true).order('nombre'),
     ])
     setFacturas(f || [])
     setClientes(c || [])
+    setProductos(p || [])
     setLoading(false)
   }
 
@@ -149,12 +153,14 @@ export default function Facturas() {
 
   const openNueva = () => {
     setEditId(null)
+    const primerCliente = clientes[0]
     setForm({
       numero: nextFacturaNumber(facturas),
-      cliente_id: clientes[0]?.id || '',
+      cliente_id: primerCliente?.id || '',
       fecha_emision: today(),
       fecha_vencimiento: sumarUnMes(today()),
       descripcion: '',
+      tipo_cliente: primerCliente?.tipo_cliente || '',
     })
     setItems([{ id: Date.now(), descripcion: '', cantidad: 1, precio_unitario: '' }])
     setMontoManual(false)
@@ -164,12 +170,14 @@ export default function Facturas() {
 
   const openEditar = async (f) => {
     setEditId(f.id)
+    const clienteFactura = clientes.find(c => c.id === f.cliente_id)
     setForm({
       numero: f.numero,
       cliente_id: f.cliente_id,
       fecha_emision: f.fecha_emision,
       fecha_vencimiento: f.fecha_vencimiento,
       descripcion: f.descripcion || '',
+      tipo_cliente: f.tipo_cliente || clienteFactura?.tipo_cliente || '',
     })
     const its = await loadItems(f.id)
     setItems(its.length > 0
@@ -201,6 +209,35 @@ export default function Facturas() {
   const addItem = () => setItems(prev => [...prev, { id: Date.now(), descripcion: '', cantidad: 1, precio_unitario: '' }])
   const removeItem = (id) => { if (items.length > 1) setItems(prev => prev.filter(i => i.id !== id)) }
   const updateItem = (id, key, value) => setItems(prev => prev.map(i => i.id === id ? { ...i, [key]: value } : i))
+
+  // Precio del producto segun el tipo de cliente elegido en la factura (por defecto: local)
+  const precioSegunTipo = (producto, tipo) => {
+    const campo = { distribuidor: 'precio_distribuidor', local: 'precio_local', nacional: 'precio_nacional', almacen: 'precio_almacen' }[tipo] || 'precio_local'
+    return Number(producto[campo]) || 0
+  }
+
+  // Sugerencias del catalogo para el texto que se esta escribiendo en una linea
+  const sugerenciasProducto = (texto) => {
+    const q = texto.trim().toLowerCase()
+    if (q.length < 2) return []
+    return productos
+      .filter(p => p.nombre.toLowerCase().includes(q) || p.referencia.toLowerCase().includes(q))
+      .slice(0, 6)
+  }
+
+  // Al elegir un producto del catalogo: completa descripcion y precio, sugiere cantidad 1
+  const elegirProductoCatalogo = (itemId, producto) => {
+    setItems(prev => prev.map(i => i.id === itemId
+      ? {
+          ...i,
+          descripcion: producto.nombre,
+          precio_unitario: precioSegunTipo(producto, form.tipo_cliente),
+          cantidad: i.cantidad && Number(i.cantidad) > 0 ? i.cantidad : 1,
+        }
+      : i
+    ))
+    setSugerenciaAbierta(null)
+  }
   const totalItems = items.reduce((s, i) => s + (parseFloat(i.cantidad) || 0) * (parseFloat(i.precio_unitario) || 0), 0)
 
   const montoFinal = montoManual ? (parseFloat(montoValor) || 0) : totalItems
@@ -219,7 +256,7 @@ export default function Facturas() {
       const { error } = await supabase.from('facturas').update({
         numero: form.numero, cliente_id: form.cliente_id,
         fecha_emision: form.fecha_emision, fecha_vencimiento: form.fecha_vencimiento,
-        monto: montoFinal, descripcion: form.descripcion,
+        monto: montoFinal, descripcion: form.descripcion, tipo_cliente: form.tipo_cliente || null,
       }).eq('id', editId)
       if (error) { toast('Error: ' + error.message, { tipo: 'error', duracion: 5000 }); setSaving(false); return }
 
@@ -239,7 +276,7 @@ export default function Facturas() {
       const { data: factura, error } = await supabase.from('facturas').insert({
         numero: form.numero, cliente_id: form.cliente_id,
         fecha_emision: form.fecha_emision, fecha_vencimiento: form.fecha_vencimiento,
-        monto: montoFinal, descripcion: form.descripcion,
+        monto: montoFinal, descripcion: form.descripcion, tipo_cliente: form.tipo_cliente || null,
       }).select().single()
       if (error) { toast('Error: ' + error.message, { tipo: 'error', duracion: 5000 }); setSaving(false); return }
       if (itemsValidos.length > 0) {
@@ -283,6 +320,10 @@ export default function Facturas() {
       const sugeridoAntes = sumarUnMes(f.fecha_emision)
       const debeSugerir = !f.fecha_vencimiento || f.fecha_vencimiento === sugeridoAntes
       return { ...f, fecha_emision: v, fecha_vencimiento: debeSugerir ? sumarUnMes(v) : f.fecha_vencimiento }
+    }
+    if (k === 'cliente_id') {
+      const nuevoCliente = clientes.find(c => c.id === v)
+      return { ...f, cliente_id: v, tipo_cliente: nuevoCliente?.tipo_cliente || '' }
     }
     return { ...f, [k]: v }
   })
@@ -863,6 +904,16 @@ export default function Facturas() {
                   <button className="btn btn-sm btn-icon" title="Crear cliente nuevo" onClick={() => setModal('nuevoCliente')}><UserPlus size={14} /></button>
                 </div>
               </div>
+              <div className="form-group">
+                <label>Tipo de cliente (define la tarifa del catálogo)</label>
+                <select value={form.tipo_cliente || ''} onChange={e => set('tipo_cliente', e.target.value)}>
+                  <option value="">Sin definir</option>
+                  <option value="distribuidor">Distribuidor</option>
+                  <option value="local">Local</option>
+                  <option value="nacional">Nacional</option>
+                  <option value="almacen">Almacén</option>
+                </select>
+              </div>
               <div className="form-row">
                 <div className="form-group"><label>Número *</label><input value={form.numero} onChange={e => set('numero', e.target.value)} placeholder="FAC-001" /></div>
                 <div className="form-group"><label>Fecha emisión *</label><input type="date" value={form.fecha_emision} onChange={e => set('fecha_emision', e.target.value)} /></div>
@@ -883,9 +934,40 @@ export default function Facturas() {
                   {items.map((item, idx) => (
                     <div key={item.id} style={{ background: 'var(--gray-50)', borderRadius: 'var(--radius)', padding: 10 }}>
                       <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--gray-500)', marginBottom: 6 }}>PRODUCTO {idx + 1}</div>
-                      <div className="form-group" style={{ marginBottom: 8 }}>
+                      <div className="form-group" style={{ marginBottom: 8, position: 'relative' }}>
                         <label>Descripción *</label>
-                        <input value={item.descripcion} onChange={e => updateItem(item.id, 'descripcion', e.target.value)} placeholder="Ej: Tapetes de lujo x4" />
+                        <input
+                          value={item.descripcion}
+                          onChange={e => { updateItem(item.id, 'descripcion', e.target.value); setSugerenciaAbierta(item.id) }}
+                          onFocus={() => setSugerenciaAbierta(item.id)}
+                          onBlur={() => setTimeout(() => setSugerenciaAbierta(prev => (prev === item.id ? null : prev)), 150)}
+                          placeholder="Escribe para buscar en el catálogo o describe libremente"
+                          autoComplete="off"
+                        />
+                        {sugerenciaAbierta === item.id && sugerenciasProducto(item.descripcion).length > 0 && (
+                          <div className="catalogo-sugerencias">
+                            {sugerenciasProducto(item.descripcion).map(p => (
+                              <div
+                                key={p.id}
+                                className="catalogo-sugerencia"
+                                onMouseDown={() => elegirProductoCatalogo(item.id, p)}
+                              >
+                                <div style={{ minWidth: 0 }}>
+                                  <div style={{ fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{p.nombre}</div>
+                                  <div style={{ fontSize: 11, color: 'var(--gray-500)' }}>{p.referencia}</div>
+                                </div>
+                                <span style={{ fontWeight: 700, fontSize: 12.5, whiteSpace: 'nowrap', color: 'var(--brand-dark)' }}>
+                                  {fmt(precioSegunTipo(p, form.tipo_cliente))}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                        {!form.tipo_cliente && (
+                          <div style={{ fontSize: 10.5, color: 'var(--gray-500)', marginTop: 3 }}>
+                            Elige un tipo de cliente arriba para ver el precio correcto del catálogo (se usa Local por defecto).
+                          </div>
+                        )}
                       </div>
                       <div className="form-row">
                         <div className="form-group"><label>Cantidad</label><input type="number" value={item.cantidad} onChange={e => updateItem(item.id, 'cantidad', e.target.value)} min="1" /></div>

@@ -666,11 +666,12 @@ tbody tr.row-clickable:hover td:first-child { box-shadow: inset 3px 0 0 var(--br
 
   .bottom-nav-item {
     flex: 1; display: flex; flex-direction: column; align-items: center; gap: 3px;
-    padding: 6px 2px; text-decoration: none; color: var(--gray-500);
+    padding: 6px 1px; text-decoration: none; color: var(--gray-500);
     position: relative; min-height: 48px; justify-content: center;
-    transition: color .15s ease;
+    transition: color .15s ease; min-width: 0;
   }
-  .bottom-nav-item span { font-size: 11px; font-weight: 500; }
+  .bottom-nav-item span { font-size: 10.5px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 100%; }
+  .bottom-nav-item svg { width: 20px; height: 20px; flex-shrink: 0; }
   .bottom-nav-item.active { color: var(--brand); }
   .bottom-nav-item.active span { font-weight: 700; }
   .bottom-nav-item:active { transform: scale(.94); }
@@ -832,3 +833,17 @@ tbody tr.row-clickable:hover td:first-child { box-shadow: inset 3px 0 0 var(--br
 /* Lista de tarjetas en móvil (sin display inline, para respetar el media query) */
 .lista-tarjetas { flex-direction: column; gap: 8px; }
 @media (max-width: 768px) { .show-mobile-block.lista-tarjetas { display: flex; } }
+
+/* ─── Sugerencias de catálogo al escribir un producto en la factura ─── */
+.catalogo-sugerencias {
+  position: absolute; top: 100%; left: 0; right: 0; z-index: 20;
+  background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
+  box-shadow: var(--shadow-md); margin-top: 4px; max-height: 240px; overflow-y: auto;
+  animation: fadeSlideUp .15s ease;
+}
+.catalogo-sugerencia {
+  display: flex; justify-content: space-between; align-items: center; gap: 10px;
+  padding: 9px 12px; cursor: pointer; font-size: 12.5px; border-bottom: 1px solid var(--border-soft);
+}
+.catalogo-sugerencia:last-child { border-bottom: none; }
+.catalogo-sugerencia:hover { background: var(--brand-light); }

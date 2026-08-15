@@ -247,7 +247,15 @@ export function generarEstadoCuentaPDF({ cliente, facturas }) {
   doc.setTextColor(...SLATE)
   doc.text(`Fecha de corte: ${fmtDate(new Date().toISOString().split('T')[0])}`, 197, 40, { align: 'right' })
 
-  const pendientes = (facturas || []).filter(f => Number(f.saldo_pendiente) > 0)
+  // Ordena por numero de factura de menor a mayor (entiende "FAC-2" antes que "FAC-10")
+  const numeroOrden = (numero) => {
+    const match = String(numero || '').match(/(\d+)/)
+    return match ? parseInt(match[1], 10) : 0
+  }
+  const pendientes = (facturas || [])
+    .filter(f => Number(f.saldo_pendiente) > 0)
+    .sort((a, b) => numeroOrden(a.numero) - numeroOrden(b.numero) || String(a.numero).localeCompare(String(b.numero)))
+
   const rows = pendientes.map(f => [
     f.numero,
     fmtDate(f.fecha_emision),
